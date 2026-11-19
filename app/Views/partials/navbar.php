@@ -84,7 +84,7 @@ $title  = $pageTitle ?? ($uRole === 'admin' ? 'Painel Administrativo' : 'PrestaÃ
 </style>
 
 <nav class="top-navbar">
-    <a href="<?= site_url('dashboard') ?>" class="top-navbar-brand">
+    <a href="<?= site_url('accountability') ?>" class="top-navbar-brand">
         <?= esc($title) ?>
     </a>
 

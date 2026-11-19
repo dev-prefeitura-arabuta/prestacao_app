@@ -2,12 +2,14 @@
 
 namespace App\Controllers;
 
+use App\Models\AccountabilityAttachmentAiModel;
 use App\Models\AccountabilityAttachmentModel;
 use App\Models\AccountabilityHistoryModel;
 use App\Models\AccountabilityItemStatusModel;
 use App\Models\AccountabilityModel;
 use App\Models\UserAccountabilityPermissionModel;
 use App\Models\UserModel;
+use App\Services\OllamaService;
 use Throwable;
 
 class Accountability extends BaseController
@@ -711,6 +713,270 @@ class Accountability extends BaseController
         $this->logHistory($accId, "Removeu anexo '{$attachment['original_name']}' do Item {$itemNumber}");
 
         return redirect()->to('/accountability/' . $accId . '#modal-item-' . $itemNumber)->with('success', 'Anexo removido com sucesso!');
+    }
+
+    public function analyzeAttachment(int $attachmentId)
+    {
+        $role          = session()->get('user_role') ?? session()->get('role') ?? 'user';
+        $currentUserId = (int) session()->get('user_id');
+
+        $attModel   = new AccountabilityAttachmentModel();
+        $attachment = $attModel->find($attachmentId);
+
+        if ($attachment === null) {
+            return $this->response->setStatusCode(404)->setJSON([
+                'success'   => false,
+                'error'     => 'Anexo não encontrado.',
+                'csrf_hash' => csrf_hash(),
+            ]);
+        }
+
+        $itemNumber = (int) $attachment['item_number'];
+        if ($role !== 'admin') {
+            $permModel    = new UserAccountabilityPermissionModel();
+            $allowedItems = $permModel->getAllowedItemsForUser($currentUserId);
+            if (! in_array($itemNumber, $allowedItems, true)) {
+                return $this->response->setStatusCode(403)->setJSON([
+                    'success'   => false,
+                    'error'     => 'Você não tem permissão para analisar este anexo.',
+                    'csrf_hash' => csrf_hash(),
+                ]);
+            }
+        }
+
+        $allItems  = AccountabilityModel::getItems();
+        $itemTitle = $allItems[$itemNumber] ?? ("Item {$itemNumber}");
+        $fullPath  = WRITEPATH . $attachment['file_path'];
+        $ext       = strtolower((string) ($attachment['file_ext'] ?? ''));
+
+        $ollama = new OllamaService();
+        $result = $ollama->analyzeAttachment($fullPath, $itemTitle, (string) $attachment['original_name'], $ext);
+
+        if (! empty($result['success']) && ! empty($result['structured']) && is_array($result['structured'])) {
+            try {
+                $aiModel = new AccountabilityAttachmentAiModel();
+                $st      = $result['structured'];
+                $aiModel->upsertByAttachment($attachmentId, [
+                    'accountability_id' => (int) $attachment['accountability_id'],
+                    'item_number'       => $itemNumber,
+                    'document_type'     => $st['document_type'] ?? 'Documento',
+                    'document_number'   => $st['document_number'] ?? 'N/I',
+                    'emitter_name'      => $st['emitter_name'] ?? 'N/I',
+                    'cnpj_cpf'          => $st['cnpj_cpf'] ?? 'N/I',
+                    'issue_date'        => $st['issue_date'] ?? 'N/I',
+                    'total_value'       => (float) ($st['total_value'] ?? 0),
+                    'summary'           => $st['summary'] ?? '',
+                    'compatibility'     => $st['compatibility'] ?? 'Compatível',
+                    'raw_response'      => $st['raw_response'] ?? '',
+                    'model_used'        => $result['model'] ?? 'qwen3-vl:8b',
+                    'analyzed_at'       => date('Y-m-d H:i:s'),
+                ]);
+            } catch (Throwable) {
+                // Continua mesmo se a tabela de cache ainda não estiver migrada
+            }
+        }
+
+        $result['csrf_hash'] = csrf_hash();
+
+        return $this->response->setJSON($result);
+    }
+
+    /**
+     * Exibe o Relatório Consolidado de IA para o Planejamento/Prestação de Contas específico,
+     * separando todos os Valores (R$) e Números de Documentos/Notas Fiscais dos anexos indexados.
+     */
+    public function report(int $id)
+    {
+        $role          = session()->get('user_role') ?? session()->get('role') ?? 'user';
+        $currentUserId = (int) session()->get('user_id');
+
+        try {
+            $model          = new AccountabilityModel();
+            $accountability = $model->find($id);
+
+            if ($accountability === null) {
+                return redirect()->to('/accountability')->with('error', 'Prestação de contas não encontrada.');
+            }
+
+            $enabledItems = AccountabilityModel::getEnabledItemsForAccountability($accountability);
+            $shortItems   = AccountabilityModel::getShortItems();
+
+            if ($role === 'admin') {
+                $allowedItemNumbers = array_keys($enabledItems);
+            } else {
+                $permModel          = new UserAccountabilityPermissionModel();
+                $userPerms          = $permModel->getAllowedItemsForUser($currentUserId);
+                $allowedItemNumbers = array_values(array_intersect($userPerms, array_keys($enabledItems)));
+            }
+
+            $attModel = new AccountabilityAttachmentModel();
+            $rawAtts  = $attModel
+                ->where('accountability_id', $id)
+                ->orderBy('item_number', 'ASC')
+                ->orderBy('id', 'ASC')
+                ->findAll();
+
+            $attachments = [];
+            foreach ($rawAtts as $att) {
+                $itemNum = (int) $att['item_number'];
+                if ($role === 'admin' || in_array($itemNum, $allowedItemNumbers, true)) {
+                    $attachments[] = $att;
+                }
+            }
+
+            $extractionsByAttId = [];
+            try {
+                $aiModel = new AccountabilityAttachmentAiModel();
+                $aiRows  = $aiModel->where('accountability_id', $id)->findAll();
+                foreach ($aiRows as $row) {
+                    $extractionsByAttId[(int) $row['attachment_id']] = $row;
+                }
+            } catch (Throwable) {
+                $extractionsByAttId = [];
+            }
+
+            $totalValue       = 0.0;
+            $analyzedCount    = 0;
+            $pendingAiCount   = 0;
+            $totalsByItem     = [];
+            $documentsEntries = [];
+
+            foreach ($attachments as $att) {
+                $attId     = (int) $att['id'];
+                $itemNum   = (int) $att['item_number'];
+                $itemTitle = rtrim($enabledItems[$itemNum] ?? ("Item {$itemNum}"), ';.');
+                $extRow    = $extractionsByAttId[$attId] ?? null;
+
+                if ($extRow !== null) {
+                    $analyzedCount++;
+                    $val = (float) ($extRow['total_value'] ?? 0);
+                    $totalValue += $val;
+                    $totalsByItem[$itemNum] = ($totalsByItem[$itemNum] ?? 0.0) + $val;
+                } else {
+                    $pendingAiCount++;
+                }
+
+                $documentsEntries[] = [
+                    'attachment' => $att,
+                    'item_num'   => $itemNum,
+                    'item_title' => $itemTitle,
+                    'item_short' => $shortItems[$itemNum] ?? ("Item {$itemNum}"),
+                    'ai'         => $extRow,
+                ];
+            }
+
+            $ollama       = new OllamaService();
+            $ollamaStatus = $ollama->getStatus();
+
+            return view('accountability/report', [
+                'userName'         => session()->get('user_name'),
+                'username'         => session()->get('username'),
+                'userEmail'        => session()->get('user_email'),
+                'userRole'         => $role,
+                'accountability'   => $accountability,
+                'enabledItems'     => $enabledItems,
+                'documentsEntries' => $documentsEntries,
+                'totalValue'       => $totalValue,
+                'totalsByItem'     => $totalsByItem,
+                'totalAttachments' => count($attachments),
+                'analyzedCount'    => $analyzedCount,
+                'pendingAiCount'   => $pendingAiCount,
+                'ollamaStatus'     => $ollamaStatus,
+            ]);
+        } catch (Throwable $e) {
+            return redirect()->to('/accountability/' . $id)->with('error', 'Erro ao gerar relatório: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Executa a leitura e extração por IA (Qwen3-VL 8B) de todos os documentos indexados deste planejamento.
+     */
+    public function analyzeAll(int $id)
+    {
+        $role          = session()->get('user_role') ?? session()->get('role') ?? 'user';
+        $currentUserId = (int) session()->get('user_id');
+        $forceReanalyze = (bool) $this->request->getPost('force');
+
+        $model          = new AccountabilityModel();
+        $accountability = $model->find($id);
+
+        if ($accountability === null) {
+            return $this->response->setStatusCode(404)->setJSON([
+                'success'   => false,
+                'error'     => 'Prestação de contas não encontrada.',
+                'csrf_hash' => csrf_hash(),
+            ]);
+        }
+
+        $allItems = AccountabilityModel::getItems();
+        $attModel = new AccountabilityAttachmentModel();
+        $rawAtts  = $attModel
+            ->where('accountability_id', $id)
+            ->orderBy('item_number', 'ASC')
+            ->findAll();
+
+        if ($role !== 'admin') {
+            $permModel    = new UserAccountabilityPermissionModel();
+            $allowedItems = $permModel->getAllowedItemsForUser($currentUserId);
+            $rawAtts      = array_values(array_filter(
+                $rawAtts,
+                static fn ($a) => in_array((int) $a['item_number'], $allowedItems, true)
+            ));
+        }
+
+        $aiModel  = new AccountabilityAttachmentAiModel();
+        $existing = [];
+        foreach ($aiModel->where('accountability_id', $id)->findAll() as $row) {
+            $existing[(int) $row['attachment_id']] = $row;
+        }
+
+        $ollama        = new OllamaService();
+        $processed     = 0;
+        $errors        = [];
+
+        foreach ($rawAtts as $att) {
+            $attId = (int) $att['id'];
+            if (! $forceReanalyze && isset($existing[$attId])) {
+                continue;
+            }
+
+            $itemNum   = (int) $att['item_number'];
+            $itemTitle = $allItems[$itemNum] ?? ("Item {$itemNum}");
+            $fullPath  = WRITEPATH . $att['file_path'];
+            $ext       = strtolower((string) ($att['file_ext'] ?? ''));
+
+            $res = $ollama->analyzeAttachment($fullPath, $itemTitle, (string) $att['original_name'], $ext);
+            if (! empty($res['success']) && ! empty($res['structured']) && is_array($res['structured'])) {
+                $st = $res['structured'];
+                $aiModel->upsertByAttachment($attId, [
+                    'accountability_id' => $id,
+                    'item_number'       => $itemNum,
+                    'document_type'     => $st['document_type'] ?? 'Documento',
+                    'document_number'   => $st['document_number'] ?? 'N/I',
+                    'emitter_name'      => $st['emitter_name'] ?? 'N/I',
+                    'cnpj_cpf'          => $st['cnpj_cpf'] ?? 'N/I',
+                    'issue_date'        => $st['issue_date'] ?? 'N/I',
+                    'total_value'       => (float) ($st['total_value'] ?? 0),
+                    'summary'           => $st['summary'] ?? '',
+                    'compatibility'     => $st['compatibility'] ?? 'Compatível',
+                    'raw_response'      => $st['raw_response'] ?? '',
+                    'model_used'        => $res['model'] ?? 'qwen3-vl:8b',
+                    'analyzed_at'       => date('Y-m-d H:i:s'),
+                ]);
+                $processed++;
+            } else {
+                $errors[] = ($att['original_name'] ?? "Anexo #{$attId}") . ': ' . ($res['error'] ?? 'Falha ao analisar');
+            }
+        }
+
+        $this->logHistory($id, "Executou análise inteligente por IA em {$processed} documento(s) indexado(s)");
+
+        return $this->response->setJSON([
+            'success'   => true,
+            'processed' => $processed,
+            'errors'    => $errors,
+            'csrf_hash' => csrf_hash(),
+        ]);
     }
 
     public function delete(int $id)

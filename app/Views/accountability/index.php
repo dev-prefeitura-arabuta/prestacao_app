@@ -471,6 +471,9 @@
                                                     <a href="<?= site_url('accountability/' . $accId) ?>" class="btn-open">
                                                         Abrir
                                                     </a>
+                                                    <a href="<?= site_url('accountability/' . $accId . '/report') ?>" class="btn-open" style="background-color: #1e3a8a;">
+                                                        Ver Relatório
+                                                    </a>
 
                                                     <?php if ($isAdmin): ?>
                                                         <form

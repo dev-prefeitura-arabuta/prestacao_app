@@ -175,19 +175,20 @@
         }
 
         .status-icon-pendente {
-            background-color: #ffedd5;
-            border: 2px solid #f97316;
-            color: #ea580c;
-            box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.15);
+            background-color: #f8fafc;
+            border: 1.5px dashed #cbd5e1;
+            color: #94a3b8;
         }
 
         .status-icon-enviado {
             background-color: #dbeafe;
+            border: 1px solid #93c5fd;
             color: #1d4ed8;
         }
 
         .status-icon-confirmado {
             background-color: #dcfce7;
+            border: 1px solid #86efac;
             color: #15803d;
         }
 
@@ -318,12 +319,52 @@
         }
 
         .checklist-row[data-status="pendente"] {
-            border-left-color: #f97316;
-            background-color: #fffaf5;
+            border-left-color: transparent;
+            background-color: #ffffff;
         }
 
         .checklist-row[data-status="pendente"]:hover {
-            background-color: #fff3e6;
+            background-color: #f8fafc;
+        }
+
+        .checklist-row[data-status="enviado"],
+        .checklist-row[data-has-files="1"][data-status="pendente"] {
+            border-left-color: #2563eb;
+            background-color: #dbeafe;
+            border-bottom-color: #bfdbfe;
+        }
+
+        .checklist-row[data-status="enviado"] .checklist-title,
+        .checklist-row[data-has-files="1"][data-status="pendente"] .checklist-title {
+            color: #1e3a8a;
+        }
+
+        .checklist-row[data-status="enviado"] .checklist-num,
+        .checklist-row[data-has-files="1"][data-status="pendente"] .checklist-num {
+            color: #1d4ed8;
+        }
+
+        .checklist-row[data-status="enviado"]:hover,
+        .checklist-row[data-has-files="1"][data-status="pendente"]:hover {
+            background-color: #bfdbfe;
+        }
+
+        .checklist-row[data-status="confirmado"] {
+            border-left-color: #16a34a;
+            background-color: #dcfce7;
+            border-bottom-color: #bbf7d0;
+        }
+
+        .checklist-row[data-status="confirmado"] .checklist-title {
+            color: #14532d;
+        }
+
+        .checklist-row[data-status="confirmado"] .checklist-num {
+            color: #15803d;
+        }
+
+        .checklist-row[data-status="confirmado"]:hover {
+            background-color: #bbf7d0;
         }
 
         .checklist-row[data-status="rejeitado"] {
@@ -386,19 +427,21 @@
         }
 
         .status-pill-pendente {
-            background-color: #ffedd5;
-            color: #c2410c;
-            border: 1px solid #fdba74;
+            background-color: #f1f5f9;
+            color: #64748b;
+            border: 1px solid #e2e8f0;
         }
 
         .status-pill-enviado {
             background-color: #dbeafe;
             color: #1d4ed8;
+            border: 1px solid #bfdbfe;
         }
 
         .status-pill-confirmado {
             background-color: #dcfce7;
             color: #15803d;
+            border: 1px solid #bbf7d0;
         }
 
         .status-pill-rejeitado {
@@ -503,7 +546,7 @@
         .item-modal-backdrop {
             position: fixed;
             inset: 0;
-            background-color: rgba(15, 23, 42, 0.72);
+            background-color: rgba(15, 23, 42, 0.65);
             display: none;
             align-items: center;
             justify-content: center;
@@ -517,80 +560,75 @@
 
         .item-modal-dialog {
             background-color: #ffffff;
-            border-radius: 16px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
             width: 100%;
-            max-width: 920px;
+            max-width: 900px;
             max-height: 90vh;
             display: flex;
             flex-direction: column;
             overflow: hidden;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.45);
+            box-shadow: 0 20px 25px -5px rgba(15, 23, 42, 0.25), 0 8px 10px -6px rgba(15, 23, 42, 0.15);
         }
 
         .item-modal-header {
-            padding: 1.2rem 1.5rem;
+            padding: 1rem 1.5rem;
             border-bottom: 1px solid #e2e8f0;
             display: flex;
-            align-items: flex-start;
+            align-items: center;
             justify-content: space-between;
             gap: 1rem;
-            background-color: #f8fafc;
+            background-color: #ffffff;
         }
 
         .item-modal-header-left {
             display: flex;
-            align-items: flex-start;
+            align-items: center;
             gap: 0.75rem;
-        }
-
-        .item-modal-num {
-            background-color: #0f172a;
-            color: #ffffff;
-            font-weight: 700;
-            font-size: 0.85rem;
-            padding: 0.35rem 0.65rem;
-            border-radius: 7px;
-            flex-shrink: 0;
+            flex-wrap: wrap;
         }
 
         .item-modal-title {
-            font-size: 1.05rem;
+            font-size: 1.02rem;
             font-weight: 700;
             color: #0f172a;
-            line-height: 1.4;
+            line-height: 1.35;
         }
 
         .btn-close-item-modal {
-            background: #e2e8f0;
-            border: none;
-            color: #0f172a;
-            width: 34px;
-            height: 34px;
-            border-radius: 8px;
-            font-size: 0.95rem;
-            font-weight: 700;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            color: #475569;
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-weight: 600;
             cursor: pointer;
             flex-shrink: 0;
+            transition: all 0.15s ease;
         }
 
         .btn-close-item-modal:hover {
-            background: #cbd5e1;
+            background: #f1f5f9;
+            color: #0f172a;
+            border-color: #cbd5e1;
         }
 
         .item-modal-body {
-            padding: 1.5rem;
+            padding: 1.35rem 1.5rem;
             overflow-y: auto;
             display: flex;
             flex-direction: column;
-            gap: 1.35rem;
+            gap: 1.25rem;
         }
 
         /* Bloco de Confirmação / Situação dentro do Modal */
         .modal-status-box {
             background-color: #f8fafc;
             border: 1px solid #e2e8f0;
-            border-radius: 12px;
-            padding: 1.15rem 1.25rem;
+            border-radius: 6px;
+            padding: 1rem 1.2rem;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -599,10 +637,12 @@
         }
 
         .modal-status-box-title {
-            font-size: 0.88rem;
+            font-size: 0.85rem;
             font-weight: 700;
             color: #0f172a;
-            margin-bottom: 0.25rem;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            margin-bottom: 0.2rem;
         }
 
         .modal-status-box-sub {
@@ -618,72 +658,76 @@
         }
 
         .status-select {
-            padding: 0.55rem 0.9rem;
+            padding: 0.48rem 0.8rem;
             border: 1px solid #cbd5e1;
-            border-radius: 9px;
+            border-radius: 6px;
             background-color: #ffffff;
             color: #0f172a;
-            font-size: 0.86rem;
+            font-size: 0.84rem;
             font-weight: 600;
             cursor: pointer;
             outline: none;
-            min-width: 165px;
+            min-width: 155px;
         }
 
         .btn-quick-confirm {
-            padding: 0.55rem 1rem;
-            background-color: #16a34a;
+            padding: 0.5rem 0.95rem;
+            background-color: #15803d;
             color: #ffffff;
-            border: none;
-            border-radius: 9px;
-            font-size: 0.84rem;
-            font-weight: 700;
+            border: 1px solid #15803d;
+            border-radius: 6px;
+            font-size: 0.82rem;
+            font-weight: 600;
             cursor: pointer;
             transition: background-color 0.15s ease;
         }
 
         .btn-quick-confirm:hover {
-            background-color: #15803d;
+            background-color: #166534;
         }
 
         .btn-quick-reject {
-            padding: 0.55rem 0.9rem;
-            background-color: #fee2e2;
-            color: #dc2626;
-            border: 1px solid #fecaca;
-            border-radius: 9px;
-            font-size: 0.84rem;
-            font-weight: 700;
+            padding: 0.5rem 0.9rem;
+            background-color: #ffffff;
+            color: #b91c1c;
+            border: 1px solid #fca5a5;
+            border-radius: 6px;
+            font-size: 0.82rem;
+            font-weight: 600;
             cursor: pointer;
+            transition: all 0.15s ease;
         }
 
         .btn-quick-reject:hover {
             background-color: #dc2626;
+            border-color: #dc2626;
             color: #ffffff;
         }
+
         .btn-reopen-item {
-            padding: 0.55rem 1.05rem;
+            padding: 0.5rem 0.95rem;
             background-color: #0f172a;
             color: #ffffff;
-            border: none;
-            border-radius: 9px;
-            font-size: 0.84rem;
-            font-weight: 700;
+            border: 1px solid #0f172a;
+            border-radius: 6px;
+            font-size: 0.82rem;
+            font-weight: 600;
             cursor: pointer;
             transition: background-color 0.15s ease;
         }
+
         .btn-reopen-item:hover {
             background-color: #334155;
         }
 
         .no-docs-warning {
-            font-size: 0.8rem;
+            font-size: 0.78rem;
             font-weight: 600;
             color: #b45309;
-            background-color: #fef3c7;
+            background-color: #fffbeb;
             border: 1px solid #fde68a;
-            padding: 0.45rem 0.8rem;
-            border-radius: 8px;
+            padding: 0.4rem 0.75rem;
+            border-radius: 6px;
         }
 
         .rejection-reason-alert {
@@ -691,15 +735,16 @@
             padding: 0.65rem 0.9rem;
             background-color: #fef2f2;
             border: 1px solid #fecaca;
-            border-left: 4px solid #dc2626;
-            border-radius: 8px;
-            color: #991b1b;
-            font-size: 0.83rem;
+            border-left: 3px solid #dc2626;
+            border-radius: 6px;
+            color: #7f1d1d;
+            font-size: 0.82rem;
             line-height: 1.45;
         }
 
         .rejection-reason-alert strong {
-            color: #dc2626;
+            color: #991b1b;
+            font-weight: 700;
             display: inline-block;
             margin-right: 0.3rem;
         }
@@ -708,7 +753,7 @@
             width: 100%;
             margin-top: 0.85rem;
             padding-top: 0.85rem;
-            border-top: 1px dashed #cbd5e1;
+            border-top: 1px solid #e2e8f0;
             display: none;
             flex-direction: column;
             gap: 0.6rem;
@@ -719,18 +764,18 @@
         }
 
         .rejection-form-box label {
-            font-size: 0.82rem;
-            font-weight: 700;
-            color: #b91c1c;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #991b1b;
         }
 
         .rejection-textarea {
             width: 100%;
-            min-height: 78px;
-            padding: 0.65rem 0.85rem;
-            border: 1px solid #fca5a5;
-            border-radius: 8px;
-            font-size: 0.86rem;
+            min-height: 74px;
+            padding: 0.6rem 0.8rem;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            font-size: 0.85rem;
             font-family: inherit;
             color: #0f172a;
             background-color: #ffffff;
@@ -740,7 +785,7 @@
 
         .rejection-textarea:focus {
             border-color: #dc2626;
-            box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.12);
+            box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
         }
 
         .rejection-form-actions {
@@ -751,8 +796,8 @@
         }
 
         .btn-cancel-reject {
-            padding: 0.48rem 0.85rem;
-            border-radius: 7px;
+            padding: 0.45rem 0.85rem;
+            border-radius: 6px;
             border: 1px solid #cbd5e1;
             background-color: #ffffff;
             color: #475569;
@@ -762,13 +807,13 @@
         }
 
         .btn-confirm-reject {
-            padding: 0.48rem 1rem;
-            border-radius: 7px;
+            padding: 0.45rem 0.95rem;
+            border-radius: 6px;
             border: none;
             background-color: #dc2626;
             color: #ffffff;
-            font-size: 0.82rem;
-            font-weight: 700;
+            font-size: 0.8rem;
+            font-weight: 600;
             cursor: pointer;
         }
 
@@ -819,10 +864,12 @@
 
         /* Upload e Lista de Anexos dentro do Modal */
         .modal-section-title {
-            font-size: 0.92rem;
+            font-size: 0.85rem;
             font-weight: 700;
             color: #0f172a;
-            margin-bottom: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            margin-bottom: 0.6rem;
         }
 
         .upload-bar {
@@ -831,9 +878,9 @@
             gap: 0.75rem;
             flex-wrap: wrap;
             background-color: #f8fafc;
-            border: 1px dashed #cbd5e1;
-            border-radius: 10px;
-            padding: 0.75rem 1rem;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            padding: 0.65rem 0.9rem;
         }
 
         .file-input {
@@ -844,8 +891,8 @@
         }
 
         .file-input::file-selector-button {
-            padding: 0.45rem 0.85rem;
-            border-radius: 6px;
+            padding: 0.42rem 0.85rem;
+            border-radius: 5px;
             border: 1px solid #cbd5e1;
             background-color: #ffffff;
             color: #0f172a;
@@ -861,28 +908,29 @@
         }
 
         .btn-upload {
-            padding: 0.52rem 1.05rem;
-            background-color: #dd4814;
+            padding: 0.48rem 1rem;
+            background-color: #0f172a;
             color: #ffffff;
-            border: none;
-            border-radius: 7px;
-            font-size: 0.82rem;
+            border: 1px solid #0f172a;
+            border-radius: 6px;
+            font-size: 0.8rem;
             font-weight: 600;
             cursor: pointer;
             white-space: nowrap;
+            transition: background-color 0.15s ease;
         }
 
         .btn-upload:hover {
-            background-color: #c23c0f;
+            background-color: #1e293b;
         }
 
         .selected-preview-strip {
             display: none;
             margin-top: 0.65rem;
             padding: 0.65rem 0.85rem;
-            background-color: #fff7ed;
-            border: 1px solid #fed7aa;
-            border-radius: 8px;
+            background-color: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
             gap: 0.55rem;
             flex-wrap: wrap;
             align-items: center;
@@ -897,8 +945,8 @@
             align-items: center;
             gap: 0.45rem;
             background: #ffffff;
-            border: 1px solid #fdba74;
-            border-radius: 7px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
             padding: 0.32rem 0.6rem;
             font-size: 0.78rem;
             color: #0f172a;
@@ -916,7 +964,7 @@
         .attachments-list {
             display: flex;
             flex-direction: column;
-            gap: 0.55rem;
+            gap: 0.5rem;
         }
 
         .attachment-row {
@@ -925,9 +973,9 @@
             justify-content: space-between;
             gap: 0.75rem;
             padding: 0.65rem 0.9rem;
-            background-color: #f8fafc;
+            background-color: #ffffff;
             border: 1px solid #e2e8f0;
-            border-radius: 9px;
+            border-radius: 6px;
             flex-wrap: wrap;
         }
 
@@ -939,9 +987,9 @@
         }
 
         .att-thumb {
-            width: 44px;
-            height: 44px;
-            border-radius: 6px;
+            width: 40px;
+            height: 40px;
+            border-radius: 5px;
             object-fit: cover;
             border: 1px solid #cbd5e1;
             cursor: pointer;
@@ -950,31 +998,31 @@
 
         .ext-badge {
             font-size: 0.68rem;
-            font-weight: 800;
+            font-weight: 700;
             text-transform: uppercase;
-            padding: 0.22rem 0.48rem;
-            border-radius: 5px;
-            background-color: #0f172a;
+            padding: 0.2rem 0.45rem;
+            border-radius: 4px;
+            background-color: #334155;
             color: #ffffff;
             flex-shrink: 0;
         }
 
         .ext-badge.ext-pdf {
-            background-color: #dc2626;
+            background-color: #b91c1c;
         }
 
         .ext-badge.ext-zip {
-            background-color: #7c3aed;
+            background-color: #475569;
         }
 
         .ext-badge.ext-jpg,
         .ext-badge.ext-jpeg,
         .ext-badge.ext-png {
-            background-color: #0284c7;
+            background-color: #0369a1;
         }
 
         .att-name {
-            font-size: 0.86rem;
+            font-size: 0.85rem;
             font-weight: 600;
             color: #0f172a;
             word-break: break-all;
@@ -988,7 +1036,7 @@
         .att-actions {
             display: flex;
             align-items: center;
-            gap: 0.45rem;
+            gap: 0.4rem;
             flex-wrap: wrap;
         }
 
@@ -996,40 +1044,104 @@
             display: inline-flex;
             align-items: center;
             gap: 0.3rem;
-            padding: 0.36rem 0.72rem;
-            background-color: #0284c7;
-            color: #ffffff;
-            border: none;
-            border-radius: 6px;
+            padding: 0.35rem 0.7rem;
+            background-color: #ffffff;
+            color: #0f172a;
+            border: 1px solid #cbd5e1;
+            border-radius: 5px;
             font-size: 0.76rem;
             font-weight: 600;
             cursor: pointer;
             text-decoration: none;
+            transition: background-color 0.15s ease;
+        }
+
+        .btn-preview:hover {
+            background-color: #f1f5f9;
         }
 
         .btn-preview.pdf {
-            background-color: #dc2626;
+            background-color: #ffffff;
+            color: #0f172a;
+            border: 1px solid #cbd5e1;
+        }
+
+        .btn-preview.pdf:hover {
+            background-color: #f1f5f9;
         }
 
         .btn-download {
-            padding: 0.36rem 0.72rem;
-            background-color: #e2e8f0;
-            color: #0f172a;
+            padding: 0.35rem 0.7rem;
+            background-color: #f8fafc;
+            border: 1px solid #cbd5e1;
+            color: #334155;
             text-decoration: none;
-            border-radius: 6px;
+            border-radius: 5px;
             font-size: 0.76rem;
             font-weight: 600;
+            transition: background-color 0.15s ease;
+        }
+
+        .btn-download:hover {
+            background-color: #f1f5f9;
+            color: #0f172a;
         }
 
         .btn-remove-att {
-            padding: 0.36rem 0.72rem;
-            background-color: #fef2f2;
-            color: #dc2626;
+            padding: 0.35rem 0.7rem;
+            background-color: #ffffff;
+            color: #b91c1c;
             border: 1px solid #fecaca;
-            border-radius: 6px;
+            border-radius: 5px;
             font-size: 0.76rem;
             font-weight: 600;
             cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .btn-remove-att:hover {
+            background-color: #fef2f2;
+            border-color: #fca5a5;
+        }
+
+        .btn-ai-analyze {
+            padding: 0.35rem 0.7rem;
+            background-color: #0f172a;
+            color: #ffffff;
+            border: 1px solid #0f172a;
+            border-radius: 5px;
+            font-size: 0.76rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.15s ease;
+        }
+
+        .btn-ai-analyze:hover {
+            background-color: #1e293b;
+        }
+
+        .btn-ai-analyze:disabled {
+            opacity: 0.6;
+            cursor: wait;
+        }
+
+        .ai-result-box {
+            width: 100%;
+            margin-top: 0.5rem;
+            padding: 0.75rem 0.95rem;
+            background-color: #f8fafc;
+            border: 1px solid #cbd5e1;
+            border-left: 3px solid #0f172a;
+            border-radius: 6px;
+            font-size: 0.82rem;
+            color: #1e293b;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            display: none;
+        }
+
+        .ai-result-box.visible {
+            display: block;
         }
 
         .empty-att-box {
@@ -1213,6 +1325,9 @@
                     </div>
 
                     <div style="display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap;">
+                        <a href="<?= site_url('accountability/' . $accId . '/report') ?>" class="btn-back" style="background-color: #0f172a; color: #ffffff; border-color: #0f172a;">
+                            📊 Ver Relatório IA (Valores e Notas)
+                        </a>
                         <?php if (($readyToSubmitCount ?? 0) > 0): ?>
                             <form action="<?= site_url('accountability/' . $accId . '/submit') ?>" method="post">
                                 <?= csrf_field() ?>
@@ -1358,14 +1473,6 @@
                                                         📎 <?= $itemCount > 0 ? $itemCount . ' anexo(s)' : 'Sem anexos' ?>
                                                     </span>
                                                 </div>
-
-                                                <div
-                                                    class="rejection-reason-alert"
-                                                    id="row-reason-<?= esc((string) $num) ?>"
-                                                    style="<?= ($itemStatus === 'rejeitado' && $itemReason !== '') ? 'display: block;' : 'display: none;' ?>">
-                                                    <strong>⚠️ Motivo da rejeição:</strong>
-                                                    <span id="row-reason-text-<?= esc((string) $num) ?>"><?= esc($itemReason) ?></span>
-                                                </div>
                                             </div>
                                         </div>
 
@@ -1414,15 +1521,10 @@
                             <div class="item-modal-dialog">
                                 <div class="item-modal-header">
                                     <div class="item-modal-header-left">
-                                        <span class="item-modal-num">Item <?= esc($numPad) ?></span>
-                                        <div>
-                                            <div class="item-modal-title"><?= esc($cleanLabel) ?></div>
-                                            <div style="margin-top: 0.35rem;">
-                                                <span
-                                                    class="status-pill status-pill-<?= esc($itemStatus) ?>"
-                                                    id="modal-pill-<?= esc((string) $num) ?>"><?= esc($statusLabelsMap[$itemStatus] ?? 'Pendente') ?></span>
-                                            </div>
-                                        </div>
+                                        <div class="item-modal-title"><?= esc($cleanLabel) ?></div>
+                                        <span
+                                            class="status-pill status-pill-<?= esc($itemStatus) ?>"
+                                            id="modal-pill-<?= esc((string) $num) ?>"><?= esc($statusLabelsMap[$itemStatus] ?? 'Pendente') ?></span>
                                     </div>
                                     <button type="button" class="btn-close-item-modal js-close-item-modal" title="Fechar">✕</button>
                                 </div>
@@ -1432,7 +1534,7 @@
                                         class="rejection-reason-alert"
                                         id="modal-reason-<?= esc((string) $num) ?>"
                                         style="margin-top: 0; <?= ($itemStatus === 'rejeitado' && $itemReason !== '') ? 'display: block;' : 'display: none;' ?>">
-                                        <strong>⚠️ Motivo da rejeição pelo Administrador:</strong>
+                                        <strong>Motivo da rejeição:</strong>
                                         <span id="modal-reason-text-<?= esc((string) $num) ?>"><?= esc($itemReason) ?></span>
                                     </div>
 
@@ -1442,7 +1544,7 @@
                                                 <div class="modal-status-box-title">Avaliação do Administrador</div>
                                                 <div class="modal-status-box-sub">
                                                     <?= $hasFiles
-                                                        ? 'Confira os documentos anexados abaixo. Se rejeitar, o item voltará para a lista de pendências do usuário.'
+                                                        ? 'Confira os documentos anexados abaixo antes de confirmar ou rejeitar.'
                                                         : 'Este item ainda não contém documentos anexados.' ?>
                                                 </div>
                                             </div>
@@ -1451,37 +1553,36 @@
                                                 <?php if ($hasFiles): ?>
                                                     <div
                                                         id="eval-confirmed-controls-<?= esc((string) $num) ?>"
-                                                        style="display: <?= $itemStatus === 'confirmado' ? 'flex' : 'none' ?>; align-items: center; gap: 0.65rem; flex-wrap: wrap;"
-                                                    >
-                                                        <span style="font-size: 0.82rem; font-weight: 700; color: #15803d;">
+                                                        style="display: <?= $itemStatus === 'confirmado' ? 'flex' : 'none' ?>; align-items: center; gap: 0.65rem; flex-wrap: wrap;">
+                                                        <span style="font-size: 0.82rem; font-weight: 600; color: #15803d;">
                                                             ✓ Documento confirmado (bloqueado para edição)
                                                         </span>
                                                         <button
                                                             type="button"
                                                             class="btn-reopen-item js-quick-status-btn"
                                                             data-item="<?= esc((string) $num) ?>"
-                                                            data-status="enviado"
-                                                        >
-                                                            ↺ Reabrir para Alterar
+                                                            data-status="enviado">
+                                                            Reabrir para Alterar
                                                         </button>
                                                     </div>
 
                                                     <div
                                                         id="eval-open-controls-<?= esc((string) $num) ?>"
-                                                        style="display: <?= $itemStatus === 'confirmado' ? 'none' : 'flex' ?>; align-items: center; gap: 0.5rem; flex-wrap: wrap;"
-                                                    >
+                                                        style="display: <?= $itemStatus === 'confirmado' ? 'none' : 'flex' ?>; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
                                                         <button
                                                             type="button"
                                                             class="btn-quick-confirm js-quick-status-btn"
                                                             data-item="<?= esc((string) $num) ?>"
                                                             data-status="confirmado">
-                                                            ✓ Confirmar
+                                                            Confirmar
                                                         </button>
                                                         <button
                                                             type="button"
+                                                            id="btn-reject-<?= esc((string) $num) ?>"
                                                             class="btn-quick-reject js-open-reject-form"
+                                                            style="<?= $itemStatus === 'rejeitado' ? 'display: none;' : '' ?>"
                                                             data-item="<?= esc((string) $num) ?>">
-                                                            ✕ Rejeitar
+                                                            Rejeitar
                                                         </button>
                                                         <select
                                                             class="status-select js-status-select"
@@ -1576,6 +1677,15 @@
                                                         </div>
 
                                                         <div class="att-actions">
+                                                            <?php if ($isImage || $isPdf): ?>
+                                                                <button
+                                                                    type="button"
+                                                                    class="btn-ai-analyze js-analyze-ai"
+                                                                    data-att-id="<?= esc((string) $attId) ?>"
+                                                                    data-url="<?= site_url('accountability/attachment/' . $attId . '/analyze') ?>">
+                                                                    Analisar com IA
+                                                                </button>
+                                                            <?php endif; ?>
                                                             <?php if ($isImage): ?>
                                                                 <button
                                                                     type="button"
@@ -1612,6 +1722,7 @@
                                                                 </form>
                                                             <?php endif; ?>
                                                         </div>
+                                                        <div class="ai-result-box" id="ai-result-<?= esc((string) $attId) ?>"></div>
                                                     </div>
                                                 <?php endforeach; ?>
                                             </div>
@@ -1808,19 +1919,28 @@
 
                         const confirmedControls = document.getElementById('eval-confirmed-controls-' + itemNum);
                         const openControls = document.getElementById('eval-open-controls-' + itemNum);
+                        const rejectBtn = document.getElementById('btn-reject-' + itemNum);
                         const uploadSection = document.getElementById('upload-section-' + itemNum);
                         const delForms = document.querySelectorAll('.js-del-att-form-' + itemNum);
+
+                        if (rejectBtn) {
+                            rejectBtn.style.display = (newStatus === 'rejeitado') ? 'none' : '';
+                        }
 
                         if (newStatus === 'confirmado') {
                             if (confirmedControls) confirmedControls.style.display = 'flex';
                             if (openControls) openControls.style.display = 'none';
                             if (uploadSection) uploadSection.style.display = 'none';
-                            delForms.forEach(f => { f.style.display = 'none'; });
+                            delForms.forEach(f => {
+                                f.style.display = 'none';
+                            });
                         } else {
                             if (confirmedControls) confirmedControls.style.display = 'none';
                             if (openControls) openControls.style.display = 'flex';
                             if (uploadSection) uploadSection.style.display = '';
-                            delForms.forEach(f => { f.style.display = ''; });
+                            delForms.forEach(f => {
+                                f.style.display = '';
+                            });
                         }
 
                         const savedReason = (data && data.rejection_reason) ? data.rejection_reason : (rejectionReason || '');
@@ -2015,6 +2135,54 @@
                         trigger.getAttribute('data-type'),
                         trigger.getAttribute('data-title')
                     );
+                    return;
+                }
+
+                const aiBtn = e.target.closest('.js-analyze-ai');
+                if (aiBtn) {
+                    e.preventDefault();
+                    const attId = aiBtn.getAttribute('data-att-id');
+                    const url = aiBtn.getAttribute('data-url');
+                    const resultBox = document.getElementById('ai-result-' + attId);
+                    if (!url || !resultBox) return;
+
+                    const origText = aiBtn.textContent;
+                    aiBtn.disabled = true;
+                    aiBtn.textContent = 'Analisando (Qwen-VL)...';
+                    resultBox.classList.add('visible');
+                    resultBox.textContent = 'Consultando modelo local via Ollama...';
+
+                    const formData = new FormData();
+                    formData.append(csrfTokenName, csrfHash);
+
+                    fetch(url, {
+                        method: 'POST',
+                        headers: {
+                            'X-Requested-With': 'XMLHttpRequest'
+                        },
+                        body: formData
+                    })
+                        .then(r => r.json())
+                        .then(data => {
+                            aiBtn.disabled = false;
+                            aiBtn.textContent = origText;
+                            if (data && data.csrf_hash) {
+                                csrfHash = data.csrf_hash;
+                                document.querySelectorAll('input[name="' + csrfTokenName + '"]').forEach(inp => {
+                                    inp.value = csrfHash;
+                                });
+                            }
+                            if (data && data.success) {
+                                resultBox.textContent = '🤖 Análise IA (' + (data.model || 'Qwen-VL') + '):\n\n' + data.content;
+                            } else {
+                                resultBox.textContent = '⚠️ ' + ((data && data.error) ? data.error : 'Não foi possível concluir a análise.');
+                            }
+                        })
+                        .catch(() => {
+                            aiBtn.disabled = false;
+                            aiBtn.textContent = origText;
+                            resultBox.textContent = '⚠️ Falha de conexão ao tentar consultar o Ollama.';
+                        });
                 }
             });
 

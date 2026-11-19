@@ -3,7 +3,7 @@
 use CodeIgniter\Router\RouteCollection;
 
 /** @var RouteCollection $routes */
-$routes->get('/', static fn() => redirect()->to('/login'));
+$routes->get('/', 'Home::index');
 
 // Rotas de Autenticação
 $routes->get('login', 'Auth::login');
@@ -12,12 +12,12 @@ $routes->get('logout', 'Auth::logout');
 
 // Rotas Protegidas pelo filtro 'auth'
 $routes->group('', ['filter' => 'auth'], static function ($routes) {
-    $routes->get('dashboard', 'Dashboard::index');
-
     $routes->get('accountability', 'Accountability::index');
     $routes->get('accountability/create', 'Accountability::create');
     $routes->post('accountability', 'Accountability::store');
     $routes->get('accountability/(:num)', 'Accountability::show/$1');
+    $routes->get('accountability/(:num)/report', 'Accountability::report/$1');
+    $routes->post('accountability/(:num)/analyze-all', 'Accountability::analyzeAll/$1');
     $routes->post('accountability/(:num)/submit', 'Accountability::submitAccountability/$1');
     $routes->post('accountability/(:num)/delete', 'Accountability::delete/$1');
     $routes->post('accountability/(:num)/upload/(:num)', 'Accountability::upload/$1/$2');
@@ -26,6 +26,7 @@ $routes->group('', ['filter' => 'auth'], static function ($routes) {
     $routes->get('accountability/attachment/(:num)/preview', 'Accountability::previewAttachment/$1');
     $routes->get('accountability/attachment/(:num)/download', 'Accountability::downloadAttachment/$1');
     $routes->post('accountability/attachment/(:num)/delete', 'Accountability::deleteAttachment/$1');
+    $routes->post('accountability/attachment/(:num)/analyze', 'Accountability::analyzeAttachment/$1');
 
     // Histórico de Auditoria
     $routes->get('history', 'AuditHistory::index');
@@ -42,4 +43,5 @@ $routes->group('', ['filter' => 'auth'], static function ($routes) {
     // Configurações
     $routes->get('settings', 'Settings::index');
     $routes->post('settings/smtp', 'Settings::saveSmtp');
+    $routes->post('settings/ollama', 'Settings::saveOllama');
 });

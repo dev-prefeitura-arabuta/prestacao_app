@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use App\Models\SmtpConfigModel;
+use App\Services\OllamaService;
 use Throwable;
 
 class Settings extends BaseController
@@ -12,7 +13,7 @@ class Settings extends BaseController
         $role = session()->get('user_role') ?? session()->get('role') ?? 'user';
 
         if ($role !== 'admin') {
-            return redirect()->to('/dashboard')->with('error', 'Acesso restrito a administradores.');
+            return redirect()->to('/accountability')->with('error', 'Acesso restrito a administradores.');
         }
 
         return null;
@@ -35,14 +36,53 @@ class Settings extends BaseController
             $smtpConfig = null;
         }
 
+        $ollamaService = new OllamaService();
+        $ollamaConfig  = $ollamaService->loadConfig();
+        $ollamaStatus  = ($activeTab === 'ollama') ? $ollamaService->getStatus() : ['online' => false, 'models' => []];
+
         return view('settings/index', [
-            'userName'   => session()->get('user_name'),
-            'username'   => session()->get('username'),
-            'userEmail'  => session()->get('user_email'),
-            'userRole'   => $role,
-            'activeTab'  => $activeTab,
-            'smtpConfig' => $smtpConfig,
+            'userName'     => session()->get('user_name'),
+            'username'     => session()->get('username'),
+            'userEmail'    => session()->get('user_email'),
+            'userRole'     => $role,
+            'activeTab'    => $activeTab,
+            'smtpConfig'   => $smtpConfig,
+            'ollamaConfig' => $ollamaConfig,
+            'ollamaStatus' => $ollamaStatus,
         ]);
+    }
+
+    public function saveOllama()
+    {
+        if ($redirect = $this->ensureAdmin()) {
+            return $redirect;
+        }
+
+        $rules = [
+            'provider' => 'required|in_list[gemini,openrouter,groq,ollama]',
+            'timeout'  => 'required|integer|greater_than_equal_to[15]|less_than_equal_to[600]',
+        ];
+
+        if (! $this->validate($rules)) {
+            return redirect()->to('/settings?tab=ollama')->withInput()->with('errors', $this->validator->getErrors());
+        }
+
+        $ollamaService = new OllamaService();
+        $ollamaService->saveConfig([
+            'provider'           => $this->request->getPost('provider'),
+            'gemini_api_key'     => $this->request->getPost('gemini_api_key'),
+            'gemini_model'       => $this->request->getPost('gemini_model'),
+            'openrouter_api_key' => $this->request->getPost('openrouter_api_key'),
+            'openrouter_model'   => $this->request->getPost('openrouter_model'),
+            'groq_api_key'       => $this->request->getPost('groq_api_key'),
+            'groq_model'         => $this->request->getPost('groq_model'),
+            'base_url'           => $this->request->getPost('base_url'),
+            'model'              => $this->request->getPost('model'),
+            'timeout'            => $this->request->getPost('timeout'),
+            'system_prompt'      => $this->request->getPost('system_prompt'),
+        ]);
+
+        return redirect()->to('/settings?tab=ollama')->with('success', 'Configurações de Inteligência Artificial salvas com sucesso!');
     }
 
     public function saveSmtp()
@@ -63,26 +103,26 @@ class Settings extends BaseController
 
         $messages = [
             'smtp_host' => [
-                'required' => 'O campo SMTP Host é obrigatório.',
+                'required' => 'O campo Servidor SMTP (Host) é obrigatório.',
             ],
             'smtp_port' => [
-                'required' => 'O campo SMTP Port é obrigatório.',
+                'required' => 'O campo Porta SMTP é obrigatório.',
             ],
             'smtp_encryption' => [
-                'required' => 'Selecione o tipo de criptografia.',
+                'required' => 'Selecione o tipo de segurança/criptografia.',
             ],
             'smtp_username' => [
-                'required' => 'O campo Username é obrigatório.',
+                'required' => 'O campo Usuário / E-mail de Login é obrigatório.',
             ],
             'email_address' => [
-                'required'    => 'O campo From Email é obrigatório.',
-                'valid_email' => 'Informe um From Email válido.',
+                'required'    => 'O campo E-mail do Remetente é obrigatório.',
+                'valid_email' => 'Informe um E-mail do Remetente válido.',
             ],
             'email_name' => [
-                'required' => 'O campo From Name é obrigatório.',
+                'required' => 'O campo Nome de Exibição do Remetente é obrigatório.',
             ],
             'reply_to_email' => [
-                'valid_email' => 'Informe um Reply-To Email válido.',
+                'valid_email' => 'Informe um E-mail para Resposta válido.',
             ],
         ];
 

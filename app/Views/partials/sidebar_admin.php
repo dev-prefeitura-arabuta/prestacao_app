@@ -206,17 +206,7 @@ $isAdmin    = ($role === 'admin');
 
     <div class="sidebar-section-label"><span>Menu Principal</span></div>
     <nav class="sidebar-nav">
-        <a href="<?= site_url('dashboard') ?>" title="Dashboard" class="sidebar-link <?= ($currentUri === 'dashboard' || $currentUri === '') ? 'active' : '' ?>">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="3" y="3" width="7" height="7" rx="1"></rect>
-                <rect x="14" y="3" width="7" height="7" rx="1"></rect>
-                <rect x="14" y="14" width="7" height="7" rx="1"></rect>
-                <rect x="3" y="14" width="7" height="7" rx="1"></rect>
-            </svg>
-            <span>Dashboard</span>
-        </a>
-
-        <a href="<?= site_url('accountability') ?>" title="Prestações de Contas" class="sidebar-link <?= str_starts_with($currentUri, 'accountability') ? 'active' : '' ?>">
+        <a href="<?= site_url('accountability') ?>" title="Prestações de Contas" class="sidebar-link <?= (str_starts_with($currentUri, 'accountability') || $currentUri === '') ? 'active' : '' ?>">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                 <polyline points="14 2 14 8 20 8"></polyline>

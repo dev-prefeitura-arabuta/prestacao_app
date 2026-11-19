@@ -14,7 +14,7 @@ class Users extends BaseController
         $role = session()->get('user_role') ?? session()->get('role') ?? 'user';
 
         if ($role !== 'admin') {
-            return redirect()->to('/dashboard')->with('error', 'Acesso restrito a administradores.');
+            return redirect()->to('/accountability')->with('error', 'Acesso restrito a administradores.');
         }
 
         return null;
