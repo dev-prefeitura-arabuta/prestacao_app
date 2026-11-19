@@ -1,9 +1,15 @@
+<?php
+$genSettings = \App\Models\GeneralSettingsModel::getSettings();
+$appName     = $genSettings['app_name'] ?? 'Sistema Patrimonial';
+$companyName = $genSettings['company_name'] ?? 'Município de Arabutã';
+$logoUrl     = site_url('app-logo') . (! empty($genSettings['app_logo']) ? '?v=' . md5((string) $genSettings['app_logo']) : '');
+?>
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login Rápido - Município de Arabutã</title>
+    <title>Login - <?= esc($appName) ?></title>
     <style>
         * {
             box-sizing: border-box;
@@ -153,7 +159,7 @@
 <body>
     <div class="login-wrapper">
         <div class="login-brand">
-            <img src="<?= base_url('assets/images/logo-arabuta.png') ?>" alt="Município de Arabutã">
+            <img src="<?= esc($logoUrl) ?>" alt="<?= esc($companyName) ?>">
         </div>
 
         <div class="login-card">

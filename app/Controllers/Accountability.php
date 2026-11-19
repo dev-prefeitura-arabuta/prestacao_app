@@ -979,6 +979,79 @@ class Accountability extends BaseController
         ]);
     }
 
+    /**
+     * Página de impressão que consolida e junta todos os arquivos anexados (PDFs, Imagens e itens de ZIP)
+     * em um único documento PDF para download ou impressão direta.
+     */
+    public function printPdf(int $id)
+    {
+        $role          = session()->get('user_role') ?? session()->get('role') ?? 'user';
+        $currentUserId = (int) session()->get('user_id');
+
+        try {
+            $model          = new AccountabilityModel();
+            $accountability = $model->find($id);
+
+            if ($accountability === null) {
+                return redirect()->to('/accountability')->with('error', 'Prestação de contas não encontrada.');
+            }
+
+            $enabledItems = AccountabilityModel::getEnabledItemsForAccountability($accountability);
+
+            if ($role === 'admin') {
+                $allowedItemNumbers = array_keys($enabledItems);
+            } else {
+                $permModel          = new UserAccountabilityPermissionModel();
+                $userPerms          = $permModel->getAllowedItemsForUser($currentUserId);
+                $allowedItemNumbers = array_values(array_intersect($userPerms, array_keys($enabledItems)));
+            }
+
+            $attModel = new AccountabilityAttachmentModel();
+            $rawAtts  = $attModel
+                ->where('accountability_id', $id)
+                ->orderBy('item_number', 'ASC')
+                ->orderBy('id', 'ASC')
+                ->findAll();
+
+            $userModel = new UserModel();
+            $usersMap  = [];
+            foreach ($userModel->findAll() as $u) {
+                $usersMap[(int) $u['id']] = $u['name'];
+            }
+
+            $attachments = [];
+            foreach ($rawAtts as $att) {
+                $itemNum = (int) $att['item_number'];
+                if ($role !== 'admin' && ! in_array($itemNum, $allowedItemNumbers, true)) {
+                    continue;
+                }
+
+                $fullPath = WRITEPATH . $att['file_path'];
+                if (! is_file($fullPath)) {
+                    continue;
+                }
+
+                $att['item_title']    = rtrim($enabledItems[$itemNum] ?? ("Item {$itemNum}"), ';.');
+                $att['uploader_name'] = $usersMap[(int) $att['user_id']] ?? ('Usuário #' . $att['user_id']);
+                $att['preview_url']   = site_url('accountability/attachment/' . $att['id'] . '/preview');
+                $attachments[]        = $att;
+            }
+
+            $generalSettings = \App\Models\GeneralSettingsModel::getSettings();
+
+            return view('accountability/print_pdf', [
+                'accountability'  => $accountability,
+                'attachments'     => $attachments,
+                'generalSettings' => $generalSettings,
+                'userName'        => session()->get('user_name'),
+                'userEmail'       => session()->get('user_email'),
+                'userRole'        => $role,
+            ]);
+        } catch (Throwable $e) {
+            return redirect()->to('/accountability/' . $id)->with('error', 'Erro ao preparar PDF consolidado: ' . $e->getMessage());
+        }
+    }
+
     public function delete(int $id)
     {
         $role = session()->get('user_role') ?? session()->get('role') ?? 'user';

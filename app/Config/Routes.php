@@ -4,6 +4,7 @@ use CodeIgniter\Router\RouteCollection;
 
 /** @var RouteCollection $routes */
 $routes->get('/', 'Home::index');
+$routes->get('app-logo', 'Settings::appLogo');
 
 // Rotas de Autenticação
 $routes->get('login', 'Auth::login');
@@ -16,6 +17,7 @@ $routes->group('', ['filter' => 'auth'], static function ($routes) {
     $routes->get('accountability/create', 'Accountability::create');
     $routes->post('accountability', 'Accountability::store');
     $routes->get('accountability/(:num)', 'Accountability::show/$1');
+    $routes->get('accountability/(:num)/print-pdf', 'Accountability::printPdf/$1');
     $routes->get('accountability/(:num)/report', 'Accountability::report/$1');
     $routes->post('accountability/(:num)/analyze-all', 'Accountability::analyzeAll/$1');
     $routes->post('accountability/(:num)/submit', 'Accountability::submitAccountability/$1');
@@ -44,4 +46,15 @@ $routes->group('', ['filter' => 'auth'], static function ($routes) {
     $routes->get('settings', 'Settings::index');
     $routes->post('settings/smtp', 'Settings::saveSmtp');
     $routes->post('settings/ollama', 'Settings::saveOllama');
+    $routes->post('settings/general', 'Settings::saveGeneral');
+    $routes->post('settings/general/remove-logo', 'Settings::removeLogo');
+    $routes->post('settings/pdf-cover', 'Settings::savePdfCover');
+    $routes->post('settings/pdf-cover/remove-art', 'Settings::removePdfCoverArt');
+    $routes->get('settings/pdf-cover/art', 'Settings::pdfCoverArt');
+
+    // Perfil do Usuário
+    $routes->get('profile', 'Profile::index');
+    $routes->post('profile/update', 'Profile::update');
+    $routes->post('profile/avatar/remove', 'Profile::removeAvatar');
+    $routes->get('profile/avatar/(:num)', 'Profile::avatar/$1');
 });

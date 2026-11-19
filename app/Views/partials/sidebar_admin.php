@@ -1,7 +1,12 @@
 <?php
-$currentUri = uri_string();
-$role       = $userRole ?? session()->get('user_role') ?? session()->get('role') ?? 'user';
-$isAdmin    = ($role === 'admin');
+$currentUri  = uri_string();
+$role        = $userRole ?? session()->get('user_role') ?? session()->get('role') ?? 'user';
+$isAdmin     = ($role === 'admin');
+$genSettings = \App\Models\GeneralSettingsModel::getSettings();
+$appName     = $genSettings['app_name'] ?? 'Sistema Patrimonial';
+$hasAppLogo  = ! empty($genSettings['app_logo']);
+$appLogoUrl  = $hasAppLogo ? site_url('app-logo') . '?v=' . md5((string) $genSettings['app_logo']) : null;
+$appInitials = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', (string) $appName) ?: 'SP', 0, 2));
 ?>
 <style>
     .admin-sidebar {
@@ -196,9 +201,15 @@ $isAdmin    = ($role === 'admin');
 <aside class="admin-sidebar" id="adminSidebar">
     <div class="sidebar-header">
         <div class="sidebar-logo">
-            <span class="logo-badge" title="Prestação App">PA</span>
+            <?php if ($hasAppLogo): ?>
+                <span class="logo-badge" title="<?= esc($appName) ?>" style="background: #1e293b; padding: 3px; overflow: hidden;">
+                    <img src="<?= esc($appLogoUrl) ?>" alt="<?= esc($appName) ?>" style="width: 100%; height: 100%; object-fit: contain; display: block;">
+                </span>
+            <?php else: ?>
+                <span class="logo-badge" title="<?= esc($appName) ?>"><?= esc($appInitials) ?></span>
+            <?php endif; ?>
             <div class="sidebar-logo-text">
-                <div class="sidebar-brand">Prestação App</div>
+                <div class="sidebar-brand"><?= esc($appName) ?></div>
                 <span class="role-badge"><?= $isAdmin ? 'Administrador' : 'Usuário' ?></span>
             </div>
         </div>
@@ -243,6 +254,14 @@ $isAdmin    = ($role === 'admin');
     <?php endif; ?>
 
     <div class="sidebar-footer">
+        <a href="<?= site_url('profile') ?>" title="Meu Perfil" class="sidebar-link <?= str_starts_with($currentUri, 'profile') ? 'active' : '' ?>">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                <circle cx="12" cy="7" r="4"></circle>
+            </svg>
+            <span>Perfil</span>
+        </a>
+
         <?php if ($isAdmin): ?>
             <a href="<?= site_url('settings') ?>" title="Configurações" class="sidebar-link <?= str_starts_with($currentUri, 'settings') ? 'active' : '' ?>">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

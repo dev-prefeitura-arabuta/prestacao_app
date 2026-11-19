@@ -1,10 +1,17 @@
+<?php
+$genSettings = \App\Models\GeneralSettingsModel::getSettings();
+$appName     = $genSettings['app_name'] ?? 'Sistema Patrimonial';
+$companyName = $genSettings['company_name'] ?? 'Município de Arabutã';
+$companyCnpj = trim((string) ($genSettings['cnpj'] ?? ''));
+$logoUrl     = site_url('app-logo') . (! empty($genSettings['app_logo']) ? '?v=' . md5((string) $genSettings['app_logo']) : '');
+?>
 <!DOCTYPE html>
 <html lang="pt-BR">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistema Patrimonial - Município de Arabutã</title>
+    <title><?= esc($appName) ?> - <?= esc($companyName) ?></title>
     <style>
         * {
             box-sizing: border-box;
@@ -181,18 +188,18 @@
 <body>
     <header class="top-bar">
         <div class="brand-wrap">
-            <span class="brand-name">Sistema Patrimonial</span>
+            <span class="brand-name"><?= esc($appName) ?></span>
         </div>
         <a href="<?= site_url('login') ?>" class="btn-login-nav">Entrar no Sistema</a>
     </header>
 
     <main class="hero">
         <section class="hero-card">
-            <img src="<?= base_url('assets/images/logo-arabuta.png') ?>" alt="Município de Arabutã" class="hero-logo">
+            <img src="<?= esc($logoUrl) ?>" alt="<?= esc($companyName) ?>" class="hero-logo">
             <span class="hero-tag">Portal Institucional</span>
-            <h1 class="hero-title">Sistema Patrimonial</h1>
+            <h1 class="hero-title"><?= esc($appName) ?></h1>
             <p class="hero-subtitle">
-                Plataforma oficial para gestão, controle documental, prestação de contas e auditoria patrimonial do Município de Arabutã.
+                Plataforma oficial para gestão, controle documental, prestação de contas e auditoria patrimonial de <?= esc($companyName) ?>.
             </p>
             <div class="hero-actions">
                 <a href="<?= site_url('login') ?>" class="btn-primary-lg">
@@ -203,7 +210,7 @@
     </main>
 
     <footer class="footer">
-        &copy; <?= date('Y') ?> Município de Arabutã — Sistema Patrimonial
+        &copy; <?= date('Y') ?> <?= esc($companyName) ?><?= $companyCnpj !== '' ? ' • CNPJ: ' . esc($companyCnpj) : '' ?> — <?= esc($appName) ?>
     </footer>
 </body>
 

@@ -471,9 +471,16 @@
                                                     <a href="<?= site_url('accountability/' . $accId) ?>" class="btn-open">
                                                         Abrir
                                                     </a>
+                                                    <?php if ($attCount > 0): ?>
+                                                        <a href="<?= site_url('accountability/' . $accId . '/print-pdf') ?>" target="_blank" class="btn-open" style="background-color: #334155;" title="Juntar todos os arquivos anexados em um único PDF para impressão">
+                                                            🖨️ PDF Único
+                                                        </a>
+                                                    <?php endif; ?>
+                                                    <?php /* Relatório com IA temporariamente desabilitado na interface
                                                     <a href="<?= site_url('accountability/' . $accId . '/report') ?>" class="btn-open" style="background-color: #1e3a8a;">
                                                         Ver Relatório
                                                     </a>
+                                                    */ ?>
 
                                                     <?php if ($isAdmin): ?>
                                                         <form

@@ -1325,9 +1325,14 @@
                     </div>
 
                     <div style="display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap;">
+                        <a href="<?= site_url('accountability/' . $accId . '/print-pdf') ?>" target="_blank" class="btn-back" style="background-color: #0f172a; color: #ffffff; border-color: #0f172a;">
+                            Imprimir PDF Único
+                        </a>
+                        <?php /* Relatório com IA temporariamente desabilitado na interface
                         <a href="<?= site_url('accountability/' . $accId . '/report') ?>" class="btn-back" style="background-color: #0f172a; color: #ffffff; border-color: #0f172a;">
                             📊 Ver Relatório IA (Valores e Notas)
                         </a>
+                        */ ?>
                         <?php if (($readyToSubmitCount ?? 0) > 0): ?>
                             <form action="<?= site_url('accountability/' . $accId . '/submit') ?>" method="post">
                                 <?= csrf_field() ?>
@@ -1677,6 +1682,7 @@
                                                         </div>
 
                                                         <div class="att-actions">
+                                                            <?php /* Análise individual com IA temporariamente desabilitada na interface
                                                             <?php if ($isImage || $isPdf): ?>
                                                                 <button
                                                                     type="button"
@@ -1686,6 +1692,7 @@
                                                                     Analisar com IA
                                                                 </button>
                                                             <?php endif; ?>
+                                                            */ ?>
                                                             <?php if ($isImage): ?>
                                                                 <button
                                                                     type="button"
@@ -2156,12 +2163,12 @@
                     formData.append(csrfTokenName, csrfHash);
 
                     fetch(url, {
-                        method: 'POST',
-                        headers: {
-                            'X-Requested-With': 'XMLHttpRequest'
-                        },
-                        body: formData
-                    })
+                            method: 'POST',
+                            headers: {
+                                'X-Requested-With': 'XMLHttpRequest'
+                            },
+                            body: formData
+                        })
                         .then(r => r.json())
                         .then(data => {
                             aiBtn.disabled = false;

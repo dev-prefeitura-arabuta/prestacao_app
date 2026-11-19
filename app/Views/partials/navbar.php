@@ -1,8 +1,10 @@
 <?php
-$uName  = $userName ?? session()->get('user_name') ?? 'Usuário';
-$uEmail = $userEmail ?? session()->get('user_email') ?? '';
-$uRole  = $userRole ?? session()->get('user_role') ?? session()->get('role') ?? 'user';
-$title  = $pageTitle ?? ($uRole === 'admin' ? 'Painel Administrativo' : 'Prestação App');
+$uId     = (int) session()->get('user_id');
+$uName   = $userName ?? session()->get('user_name') ?? 'Usuário';
+$uEmail  = $userEmail ?? session()->get('user_email') ?? '';
+$uRole   = $userRole ?? session()->get('user_role') ?? session()->get('role') ?? 'user';
+$uAvatar = session()->get('user_avatar');
+$title   = $pageTitle ?? ($uRole === 'admin' ? 'Painel Administrativo' : 'Prestação App');
 ?>
 <style>
     .top-navbar {
@@ -43,6 +45,13 @@ $title  = $pageTitle ?? ($uRole === 'admin' ? 'Painel Administrativo' : 'Presta�
         align-items: center;
         justify-content: center;
         flex-shrink: 0;
+        overflow: hidden;
+    }
+    .top-user-avatar img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
     }
     .top-user-text {
         display: flex;
@@ -89,9 +98,13 @@ $title  = $pageTitle ?? ($uRole === 'admin' ? 'Painel Administrativo' : 'Presta�
     </a>
 
     <div class="top-navbar-right">
-        <div class="top-user-info">
+        <a href="<?= site_url('profile') ?>" class="top-user-info" title="Acessar meu perfil" style="text-decoration: none;">
             <div class="top-user-avatar">
-                <?= esc(strtoupper(substr((string) $uName, 0, 1))) ?>
+                <?php if (! empty($uAvatar) && $uId > 0): ?>
+                    <img src="<?= site_url('profile/avatar/' . $uId) ?>?v=<?= esc(md5((string) $uAvatar)) ?>" alt="<?= esc($uName) ?>">
+                <?php else: ?>
+                    <?= esc(strtoupper(substr((string) $uName, 0, 1))) ?>
+                <?php endif; ?>
             </div>
             <div class="top-user-text">
                 <strong><?= esc($uName) ?></strong>
@@ -99,7 +112,7 @@ $title  = $pageTitle ?? ($uRole === 'admin' ? 'Painel Administrativo' : 'Presta�
                     <small><?= esc($uEmail) ?></small>
                 <?php endif; ?>
             </div>
-        </div>
+        </a>
 
         <a href="<?= site_url('logout') ?>" class="top-btn-logout" title="Sair do sistema">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

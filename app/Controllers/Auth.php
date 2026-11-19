@@ -129,13 +129,14 @@ class Auth extends BaseController
         $session = session();
         $session->regenerate();
         $session->set([
-            'user_id'    => $authenticatedUser['id'],
-            'user_name'  => $authenticatedUser['name'],
-            'username'   => $authenticatedUser['username'] ?? $authenticatedUser['name'],
-            'user_email' => $authenticatedUser['email'],
-            'user_role'  => $authenticatedUser['role'] ?? 'user',
-            'role'       => $authenticatedUser['role'] ?? 'user',
-            'isLoggedIn' => true,
+            'user_id'     => $authenticatedUser['id'],
+            'user_name'   => $authenticatedUser['name'],
+            'username'    => $authenticatedUser['username'] ?? $authenticatedUser['name'],
+            'user_email'  => $authenticatedUser['email'],
+            'user_role'   => $authenticatedUser['role'] ?? 'user',
+            'role'        => $authenticatedUser['role'] ?? 'user',
+            'user_avatar' => $authenticatedUser['avatar'] ?? null,
+            'isLoggedIn'  => true,
         ]);
 
         return redirect()->to('/accountability');
@@ -185,6 +186,7 @@ class Auth extends BaseController
                         'username' => strtolower((string) $dbUser['name']),
                         'email'    => $dbUser['email'],
                         'role'     => $dbUser['role'] ?? 'user',
+                        'avatar'   => $dbUser['avatar'] ?? null,
                     ];
                 }
 

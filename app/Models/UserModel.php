@@ -17,6 +17,7 @@ class UserModel extends Model
         'email',
         'password_hashed',
         'role',
+        'avatar',
     ];
 
     protected bool $allowEmptyInserts = false;

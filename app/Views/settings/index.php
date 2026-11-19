@@ -290,11 +290,16 @@
                     <a href="<?= site_url('settings?tab=smtp') ?>" class="tab-btn <?= $currentTab === 'smtp' ? 'active' : '' ?>">
                         Servidor SMTP (E-mail)
                     </a>
+                    <?php /* Aba de IA temporariamente desabilitada na interface
                     <a href="<?= site_url('settings?tab=ollama') ?>" class="tab-btn <?= $currentTab === 'ollama' ? 'active' : '' ?>">
                         Inteligência Artificial (Ollama / Qwen-VL)
                     </a>
+                    */ ?>
                     <a href="<?= site_url('settings?tab=general') ?>" class="tab-btn <?= $currentTab === 'general' ? 'active' : '' ?>">
                         Geral
+                    </a>
+                    <a href="<?= site_url('settings?tab=pdf_cover') ?>" class="tab-btn <?= $currentTab === 'pdf_cover' ? 'active' : '' ?>">
+                        Capa do PDF Unificado
                     </a>
                 </div>
 
@@ -656,16 +661,400 @@
                 </div>
 
                 <!-- Aba: Geral -->
+                <?php
+                $gAppName     = old('app_name', $generalConfig['app_name'] ?? 'Sistema Patrimonial');
+                $gCompanyName = old('company_name', $generalConfig['company_name'] ?? 'Município de Arabutã');
+                $gCnpj        = old('cnpj', $generalConfig['cnpj'] ?? '');
+                $gHasLogo     = ! empty($generalConfig['app_logo']);
+                $gLogoUrl     = site_url('app-logo') . ($gHasLogo ? '?v=' . md5((string) $generalConfig['app_logo']) : '');
+                ?>
                 <div class="tab-pane <?= $currentTab === 'general' ? 'active' : '' ?>">
                     <div class="smtp-card">
-                        <div class="section-header">
-                            <h2 class="section-title">Configurações Gerais</h2>
-                        </div>
-                        <p style="color: #64748b; font-size: 0.9rem;">Espaço reservado para demais configurações gerais do sistema.</p>
+                        <form action="<?= site_url('settings/general') ?>" method="post" enctype="multipart/form-data">
+                            <?= csrf_field() ?>
+
+                            <div class="section-header">
+                                <h2 class="section-title">Identidade do Aplicativo e Dados da Empresa / Órgão</h2>
+                            </div>
+
+                            <div style="display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; padding: 1rem; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 1.15rem;">
+                                <div style="width: 110px; height: 74px; border-radius: 6px; background-color: #0f172a; border: 1px solid #cbd5e1; display: flex; align-items: center; justify-content: center; padding: 0.4rem; overflow: hidden; flex-shrink: 0;">
+                                    <img
+                                        src="<?= esc($gLogoUrl) ?>"
+                                        alt="Logo do Aplicativo"
+                                        id="generalLogoPreview"
+                                        style="max-width: 100%; max-height: 100%; object-fit: contain; display: block;">
+                                </div>
+
+                                <div style="flex: 1; min-width: 240px;">
+                                    <label for="app_logo_input" style="display: block; font-size: 0.82rem; font-weight: 600; color: #334155; margin-bottom: 0.35rem;">
+                                        Logo do Aplicativo (PNG, JPG, WEBP ou SVG — máx. 5 MB)
+                                    </label>
+                                    <input
+                                        type="file"
+                                        id="app_logo_input"
+                                        name="app_logo"
+                                        class="form-control"
+                                        accept=".png,.jpg,.jpeg,.webp,.svg,image/png,image/jpeg,image/webp,image/svg+xml">
+                                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.4rem;">
+                                        <span style="font-size: 0.76rem; color: #64748b;">
+                                            Exibida na tela inicial, login e menu lateral do sistema.
+                                        </span>
+                                        <?php if ($gHasLogo): ?>
+                                            <button
+                                                type="submit"
+                                                formaction="<?= site_url('settings/general/remove-logo') ?>"
+                                                formnovalidate
+                                                onclick="return confirm('Remover a logo personalizada e restaurar a padrão?');"
+                                                style="background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; border-radius: 5px; padding: 0.25rem 0.65rem; font-size: 0.75rem; font-weight: 600; cursor: pointer;">
+                                                Restaurar Logo Padrão
+                                            </button>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-row-3">
+                                <div class="form-group">
+                                    <label for="general_app_name">Nome do Aplicativo</label>
+                                    <input
+                                        type="text"
+                                        id="general_app_name"
+                                        name="app_name"
+                                        class="form-control"
+                                        placeholder="Ex: Sistema Patrimonial"
+                                        value="<?= esc((string) $gAppName) ?>"
+                                        required>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="general_company_name">Empresa / Órgão</label>
+                                    <input
+                                        type="text"
+                                        id="general_company_name"
+                                        name="company_name"
+                                        class="form-control"
+                                        placeholder="Ex: Município de Arabutã"
+                                        value="<?= esc((string) $gCompanyName) ?>"
+                                        required>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="general_cnpj">CNPJ</label>
+                                    <input
+                                        type="text"
+                                        id="general_cnpj"
+                                        name="cnpj"
+                                        class="form-control"
+                                        placeholder="00.000.000/0000-00"
+                                        maxlength="18"
+                                        value="<?= esc((string) $gCnpj) ?>">
+                                </div>
+                            </div>
+
+                            <div class="form-actions">
+                                <button type="submit" class="btn-submit">Salvar Configurações Gerais</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Aba: Capa do PDF Unificado -->
+                <?php
+                $pdfCoverEnabled      = (int) old('pdf_cover_enabled', $generalConfig['pdf_cover_enabled'] ?? 1);
+                $pdfIndexEnabled      = (int) old('pdf_cover_index_enabled', $generalConfig['pdf_cover_index_enabled'] ?? 1);
+                $pdfShowLogo          = (int) old('pdf_cover_show_logo', $generalConfig['pdf_cover_show_logo'] ?? 1);
+                $pdfShowBorder        = (int) old('pdf_cover_show_border', $generalConfig['pdf_cover_show_border'] ?? 1);
+                $pdfCoverLabel        = old('pdf_cover_label', $generalConfig['pdf_cover_label'] ?? 'PRESTAÇÃO DE CONTAS');
+                $pdfCoverSubtitle     = old('pdf_cover_subtitle', $generalConfig['pdf_cover_subtitle'] ?? 'DOSSIÊ DOCUMENTAL CONSOLIDADO');
+                $pdfCoverFooter       = old('pdf_cover_footer', $generalConfig['pdf_cover_footer'] ?? '');
+                $pdfCoverPrimaryColor = old('pdf_cover_primary_color', $generalConfig['pdf_cover_primary_color'] ?? '#0f172a');
+                $pdfCoverAccentColor  = old('pdf_cover_accent_color', $generalConfig['pdf_cover_accent_color'] ?? '#dd4814');
+                $pdfHasCoverArt       = ! empty($generalConfig['pdf_cover_art']);
+                $pdfCoverArtUrl       = $pdfHasCoverArt ? site_url('settings/pdf-cover/art') . '?v=' . md5((string) $generalConfig['pdf_cover_art']) : '';
+                ?>
+                <div class="tab-pane <?= $currentTab === 'pdf_cover' ? 'active' : '' ?>">
+                    <div class="smtp-card">
+                        <form action="<?= site_url('settings/pdf-cover') ?>" method="post" enctype="multipart/form-data">
+                            <?= csrf_field() ?>
+
+                            <div class="section-header">
+                                <h2 class="section-title">Montagem e Personalização da Capa do PDF Unificado</h2>
+                            </div>
+
+                            <div style="display: grid; grid-template-columns: 1.45fr 215px; gap: 1.25rem; align-items: start;">
+                                <div>
+                                    <div class="form-group" style="margin-bottom: 0.65rem;">
+                                        <label>Elementos da Capa e Estrutura do PDF</label>
+                                        <div class="checkbox-group" style="margin-top: 0.25rem; gap: 0.9rem;">
+                                            <label class="checkbox-label">
+                                                <input type="checkbox" id="pdf_cover_enabled" name="pdf_cover_enabled" value="1" <?= $pdfCoverEnabled === 1 ? 'checked' : '' ?>>
+                                                Gerar Capa Institucional
+                                            </label>
+                                            <label class="checkbox-label">
+                                                <input type="checkbox" id="pdf_cover_index_enabled" name="pdf_cover_index_enabled" value="1" <?= $pdfIndexEnabled === 1 ? 'checked' : '' ?>>
+                                                Gerar Página de Índice
+                                            </label>
+                                            <label class="checkbox-label">
+                                                <input type="checkbox" id="pdf_cover_show_logo" name="pdf_cover_show_logo" value="1" <?= $pdfShowLogo === 1 ? 'checked' : '' ?>>
+                                                Exibir Logo na Capa
+                                            </label>
+                                            <label class="checkbox-label">
+                                                <input type="checkbox" id="pdf_cover_show_border" name="pdf_cover_show_border" value="1" <?= $pdfShowBorder === 1 ? 'checked' : '' ?>>
+                                                Exibir Moldura Externa
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <div class="form-row-2">
+                                        <div class="form-group">
+                                            <label for="pdf_cover_label">Título Superior da Capa</label>
+                                            <input
+                                                type="text"
+                                                id="pdf_cover_label"
+                                                name="pdf_cover_label"
+                                                class="form-control"
+                                                placeholder="PRESTAÇÃO DE CONTAS"
+                                                value="<?= esc((string) $pdfCoverLabel) ?>">
+                                        </div>
+
+                                        <div class="form-group">
+                                            <label for="pdf_cover_footer">Texto do Rodapé da Capa (Opcional)</label>
+                                            <input
+                                                type="text"
+                                                id="pdf_cover_footer"
+                                                name="pdf_cover_footer"
+                                                class="form-control"
+                                                placeholder="Em branco usa: <?= esc($gCompanyName . ' - ' . $gAppName) ?>"
+                                                value="<?= esc((string) $pdfCoverFooter) ?>">
+                                        </div>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="pdf_cover_art_input">Arte / Imagem de Fundo da Capa A4 (PNG, JPG ou WEBP — Opcional)</label>
+                                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                            <input
+                                                type="file"
+                                                id="pdf_cover_art_input"
+                                                name="pdf_cover_art"
+                                                class="form-control"
+                                                style="padding: 0.38rem 0.65rem;"
+                                                accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp">
+                                            <?php if ($pdfHasCoverArt): ?>
+                                                <button
+                                                    type="submit"
+                                                    formaction="<?= site_url('settings/pdf-cover/remove-art') ?>"
+                                                    formnovalidate
+                                                    onclick="return confirm('Remover a arte personalizada da capa?');"
+                                                    style="background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; border-radius: 5px; padding: 0.45rem 0.7rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; white-space: nowrap;">
+                                                    Remover Arte
+                                                </button>
+                                            <?php endif; ?>
+                                        </div>
+                                    </div>
+
+                                    <div class="form-row-2">
+                                        <div class="form-group" style="margin-bottom: 0;">
+                                            <label for="pdf_cover_primary_color">Cor Principal (Faixa e Títulos)</label>
+                                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                                <input
+                                                    type="color"
+                                                    id="pdf_cover_primary_color"
+                                                    name="pdf_cover_primary_color"
+                                                    value="<?= esc((string) $pdfCoverPrimaryColor) ?>"
+                                                    style="width: 38px; height: 34px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 2px; background: #fff; cursor: pointer;">
+                                                <input
+                                                    type="text"
+                                                    id="pdf_cover_primary_hex"
+                                                    class="form-control"
+                                                    value="<?= esc((string) $pdfCoverPrimaryColor) ?>"
+                                                    readonly>
+                                            </div>
+                                        </div>
+
+                                        <div class="form-group" style="margin-bottom: 0;">
+                                            <label for="pdf_cover_accent_color">Cor de Destaque (Linhas e App)</label>
+                                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                                <input
+                                                    type="color"
+                                                    id="pdf_cover_accent_color"
+                                                    name="pdf_cover_accent_color"
+                                                    value="<?= esc((string) $pdfCoverAccentColor) ?>"
+                                                    style="width: 38px; height: 34px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 2px; background: #fff; cursor: pointer;">
+                                                <input
+                                                    type="text"
+                                                    id="pdf_cover_accent_hex"
+                                                    class="form-control"
+                                                    value="<?= esc((string) $pdfCoverAccentColor) ?>"
+                                                    readonly>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Mini Pré-visualização ao Vivo da Capa A4 -->
+                                <div>
+                                    <div style="font-size: 0.7rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 0.3rem; text-align: center;">
+                                        Pré-visualização (A4)
+                                    </div>
+                                    <div id="coverPreviewSheet" style="width: 100%; max-width: 215px; margin: 0 auto; aspect-ratio: 210 / 297; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 4px; padding: 10px; box-shadow: 0 3px 8px rgba(15, 23, 42, 0.08); display: flex; flex-direction: column; justify-content: space-between; text-align: center; position: relative; overflow: hidden;">
+                                        <img
+                                            id="coverPreviewArtBg"
+                                            src="<?= esc($pdfCoverArtUrl) ?>"
+                                            alt=""
+                                            style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; display: <?= $pdfHasCoverArt ? 'block' : 'none' ?>;">
+                                        <div id="coverPreviewFrame" style="position: relative; z-index: 1; flex: 1; border: 1px solid #cbd5e1; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden;">
+                                            <div id="coverPreviewTopBar" style="height: 5px; background-color: <?= esc((string) $pdfCoverPrimaryColor) ?>; width: 100%;"></div>
+
+                                            <div style="padding: 8px 6px 2px;">
+                                                <img
+                                                    id="coverPreviewLogo"
+                                                    src="<?= esc($gLogoUrl) ?>"
+                                                    alt="Logo"
+                                                    style="max-width: 68px; max-height: 26px; object-fit: contain; margin: 0 auto 4px; display: <?= $pdfShowLogo === 1 ? 'block' : 'none' ?>;">
+                                                <div id="coverPreviewCompany" style="font-size: 0.54rem; font-weight: 800; color: <?= esc((string) $pdfCoverPrimaryColor) ?>; text-transform: uppercase;">
+                                                    <?= esc((string) $gCompanyName) ?>
+                                                </div>
+                                                <?php if ($gCnpj !== ''): ?>
+                                                    <div style="font-size: 0.44rem; color: #64748b;">CNPJ: <?= esc((string) $gCnpj) ?></div>
+                                                <?php endif; ?>
+                                                <div id="coverPreviewApp" style="font-size: 0.48rem; font-weight: 700; color: <?= esc((string) $pdfCoverAccentColor) ?>; margin-top: 1px;">
+                                                    <?= esc((string) $gAppName) ?>
+                                                </div>
+                                            </div>
+
+                                            <div style="padding: 0 10px;">
+                                                <div id="coverPreviewAccentLine" style="width: 55%; height: 1.5px; background-color: <?= esc((string) $pdfCoverAccentColor) ?>; margin: 0 auto 6px;"></div>
+                                                <div id="coverPreviewLabel" style="font-size: 0.48rem; font-weight: 700; color: #64748b; letter-spacing: 0.04em;">
+                                                    <?= esc((string) $pdfCoverLabel) ?>
+                                                </div>
+                                                <div id="coverPreviewTitle" style="font-size: 0.76rem; font-weight: 800; color: <?= esc((string) $pdfCoverPrimaryColor) ?>; margin: 4px 0;">
+                                                    Título da Prestação de Contas
+                                                </div>
+                                                <div style="font-size: 0.45rem; color: #64748b;">Descrição resumida do planejamento</div>
+                                            </div>
+
+                                            <div style="padding: 6px 8px;">
+                                                <div id="coverPreviewFooter" style="font-size: 0.44rem; color: #94a3b8;">
+                                                    <?= esc((string) ($pdfCoverFooter ?: ($gCompanyName . ' - ' . $gAppName))) ?>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-actions">
+                                <button type="submit" class="btn-submit">Salvar Configurações da Capa do PDF</button>
+                            </div>
+                        </form>
                     </div>
                 </div>
             </main>
         </div>
     </div>
+
+    <script>
+        (function () {
+            const logoInput = document.getElementById('app_logo_input');
+            const logoPreview = document.getElementById('generalLogoPreview');
+            const cnpjInput = document.getElementById('general_cnpj');
+
+            if (logoInput && logoPreview) {
+                logoInput.addEventListener('change', function () {
+                    const file = this.files && this.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = function (e) {
+                        logoPreview.src = e.target.result;
+                    };
+                    reader.readAsDataURL(file);
+                });
+            }
+
+            if (cnpjInput) {
+                cnpjInput.addEventListener('input', function () {
+                    let v = this.value.replace(/\D/g, '').slice(0, 14);
+                    if (v.length > 12) {
+                        v = v.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{0,2}).*/, '$1.$2.$3/$4-$5');
+                    } else if (v.length > 8) {
+                        v = v.replace(/^(\d{2})(\d{3})(\d{3})(\d{0,4}).*/, '$1.$2.$3/$4');
+                    } else if (v.length > 5) {
+                        v = v.replace(/^(\d{2})(\d{3})(\d{0,3}).*/, '$1.$2.$3');
+                    } else if (v.length > 2) {
+                        v = v.replace(/^(\d{2})(\d{0,3}).*/, '$1.$2');
+                    }
+                    this.value = v;
+                });
+            }
+
+            // Pré-visualização em tempo real da Capa do PDF Unificado
+            const elShowLogo = document.getElementById('pdf_cover_show_logo');
+            const elShowBorder = document.getElementById('pdf_cover_show_border');
+            const elLabel = document.getElementById('pdf_cover_label');
+            const elSubtitle = document.getElementById('pdf_cover_subtitle');
+            const elFooter = document.getElementById('pdf_cover_footer');
+            const elPrimary = document.getElementById('pdf_cover_primary_color');
+            const elPrimaryHex = document.getElementById('pdf_cover_primary_hex');
+            const elAccent = document.getElementById('pdf_cover_accent_color');
+            const elAccentHex = document.getElementById('pdf_cover_accent_hex');
+
+            function updateCoverPreview() {
+                const frame = document.getElementById('coverPreviewFrame');
+                const topBar = document.getElementById('coverPreviewTopBar');
+                const logo = document.getElementById('coverPreviewLogo');
+                const company = document.getElementById('coverPreviewCompany');
+                const app = document.getElementById('coverPreviewApp');
+                const accentLine = document.getElementById('coverPreviewAccentLine');
+                const label = document.getElementById('coverPreviewLabel');
+                const title = document.getElementById('coverPreviewTitle');
+                const subtitle = document.getElementById('coverPreviewSubtitle');
+                const footer = document.getElementById('coverPreviewFooter');
+
+                if (logo && elShowLogo) logo.style.display = elShowLogo.checked ? 'block' : 'none';
+                if (frame && elShowBorder) frame.style.border = elShowBorder.checked ? '1px solid #cbd5e1' : '1px solid transparent';
+                if (label && elLabel) label.textContent = elLabel.value || 'PRESTAÇÃO DE CONTAS';
+                if (subtitle && elSubtitle) subtitle.textContent = elSubtitle.value || 'DOSSIÊ DOCUMENTAL CONSOLIDADO';
+                if (footer && elFooter) footer.textContent = elFooter.value || <?= json_encode($gCompanyName . ' - ' . $gAppName, JSON_UNESCAPED_UNICODE) ?>;
+
+                if (elPrimary) {
+                    const pc = elPrimary.value;
+                    if (elPrimaryHex) elPrimaryHex.value = pc;
+                    if (topBar) topBar.style.backgroundColor = pc;
+                    if (company) company.style.color = pc;
+                    if (title) title.style.color = pc;
+                    if (subtitle) subtitle.style.color = pc;
+                }
+                if (elAccent) {
+                    const ac = elAccent.value;
+                    if (elAccentHex) elAccentHex.value = ac;
+                    if (app) app.style.color = ac;
+                    if (accentLine) accentLine.style.backgroundColor = ac;
+                }
+            }
+
+            [elShowLogo, elShowBorder, elLabel, elSubtitle, elFooter, elPrimary, elAccent].forEach(function (el) {
+                if (el) {
+                    el.addEventListener('input', updateCoverPreview);
+                    el.addEventListener('change', updateCoverPreview);
+                }
+            });
+
+            const elCoverArtInput = document.getElementById('pdf_cover_art_input');
+            const elCoverArtBg = document.getElementById('coverPreviewArtBg');
+            if (elCoverArtInput && elCoverArtBg) {
+                elCoverArtInput.addEventListener('change', function () {
+                    const file = this.files && this.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = function (e) {
+                        elCoverArtBg.src = e.target.result;
+                        elCoverArtBg.style.display = 'block';
+                    };
+                    reader.readAsDataURL(file);
+                });
+            }
+        })();
+    </script>
 </body>
 </html>
