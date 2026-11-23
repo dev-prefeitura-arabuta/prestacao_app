@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 
 namespace App\Services;
 
@@ -64,7 +64,7 @@ class OllamaService
             'system_prompt'      => 'Você é um auditor especialista em prestação de contas públicas municipais. Analise documentos e notas fiscais em português do Brasil, extraindo com precisão números de documento/nota, CNPJ/CPF, datas e valores monetários (R$).',
         ];
 
-        $configFile = WRITEPATH . 'ollama_config.json';
+        $configFile = storage_path('app/ollama_config.json');
         if (is_file($configFile)) {
             $decoded = json_decode((string) file_get_contents($configFile), true);
             if (is_array($decoded)) {
@@ -105,7 +105,7 @@ class OllamaService
 
     public function saveConfig(array $data): bool
     {
-        $configFile = WRITEPATH . 'ollama_config.json';
+        $configFile = storage_path('app/ollama_config.json');
         $current    = $this->loadConfig();
         $merged     = array_merge($current, [
             'provider'           => strtolower(trim((string) ($data['provider'] ?? $current['provider']))),
@@ -797,3 +797,4 @@ class OllamaService
         ];
     }
 }
+
