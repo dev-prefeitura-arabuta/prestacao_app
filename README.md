@@ -1,4 +1,4 @@
-# Sistema de Prestação de Contas (Monorepo)
+# Sistema de Prestação de Contas
 
 Estrutura organizada em dois aplicativos independentes:
 
