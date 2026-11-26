@@ -1,14 +1,17 @@
 .DS_Store
 Thumbs.db
 *.log
+*.zip
+*.apk
+*.aab
 
 # Web (Laravel)
 /web/.env
 /web/vendor/
 /web/node_modules/
-/web/public/build/
-/web/public/hot
-/web/public/storage
+/web/public_html/build/
+/web/public_html/hot
+/web/public_html/storage
 /web/services/openwa/
 /web/storage/*.key
 /web/storage/pail/
@@ -28,3 +31,7 @@ Thumbs.db
 /mobile/*.key
 /mobile/*.mobileprovision
 /mobile/*.orig.*
+/mobile/android/local.properties
+/mobile/android/.gradle/
+/mobile/android/build/
+/mobile/android/app/build/

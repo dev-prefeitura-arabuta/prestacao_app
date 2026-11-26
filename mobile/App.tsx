@@ -45,6 +45,7 @@ import {
   apiGetUserDetail,
   apiGetUsers,
   apiLogin,
+  apiRemindWhatsapp,
   apiRemoveAvatar,
   apiResetPassword,
   apiSubmitAccountability,
@@ -132,6 +133,31 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+function formatDateMask(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+}
+
+function formatDateFromOffset(daysFromToday: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + daysFromToday);
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+function formatEndOfMonth(): string {
+  const now = new Date();
+  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const dd = String(last.getDate()).padStart(2, '0');
+  const mm = String(last.getMonth() + 1).padStart(2, '0');
+  const yyyy = last.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+}
+
 const BRAND_SHIELD_IMG = require('./assets/brand-shield.png');
 const SISTEMA_LOGO_IMG = require('./assets/sistema-logo.png');
 
@@ -144,23 +170,11 @@ function BrandShieldIcon({ size = 28 }: { size?: number }) {
   );
 }
 
-function DesktopLogo({ apiUrl, height = 78 }: { apiUrl: string; height?: number }) {
-  const [imgFailed, setImgFailed] = useState(false);
-
-  if (imgFailed) {
-    return (
-      <Image
-        source={SISTEMA_LOGO_IMG}
-        style={{ width: 245, height, resizeMode: 'contain' }}
-      />
-    );
-  }
-
+function DesktopLogo({ height = 78 }: { apiUrl?: string; height?: number }) {
   return (
     <Image
-      source={{ uri: `${apiUrl.replace(/\/+$/, '')}/app-logo` }}
-      style={{ width: 245, height, resizeMode: 'contain' }}
-      onError={() => setImgFailed(true)}
+      source={SISTEMA_LOGO_IMG}
+      style={{ width: Math.round(height * 2.7), maxWidth: '100%', height, resizeMode: 'contain' }}
     />
   );
 }
@@ -228,6 +242,12 @@ export default function App() {
   const [editUserPassword, setEditUserPassword] = useState('');
   const [editUserAllowedItems, setEditUserAllowedItems] = useState<number[]>([]);
   const [editUserSaving, setEditUserSaving] = useState(false);
+
+  // Cobrança / Lembrete por WhatsApp (Admin)
+  const [waModalOpen, setWaModalOpen] = useState(false);
+  const [waTargetItemNum, setWaTargetItemNum] = useState<number | null>(null);
+  const [waCustomMsg, setWaCustomMsg] = useState('');
+  const [waSendingUserId, setWaSendingUserId] = useState<number | null>(null);
 
   // Meu Perfil (formulário detalhado)
   const [profileName, setProfileName] = useState('');
@@ -365,7 +385,7 @@ export default function App() {
         mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [1, 1],
-        quality: 0.85,
+        quality: 0.72,
       };
 
       const result =
@@ -572,7 +592,7 @@ export default function App() {
 
       const opts: ImagePicker.ImagePickerOptions = {
         mediaTypes: ['images'],
-        quality: 0.85,
+        quality: 0.72,
       };
 
       const result =
@@ -582,7 +602,8 @@ export default function App() {
 
       if (result.canceled || !result.assets?.length) return;
       const asset = result.assets[0];
-      const extFromMime = asset.mimeType === 'image/png' ? 'png' : 'jpg';
+      const extFromMime =
+        asset.mimeType === 'image/png' ? 'png' : asset.mimeType === 'image/webp' ? 'webp' : 'jpg';
       const fileName = asset.fileName || `documento_item_${itemNumber}_${Date.now()}.${extFromMime}`;
 
       setUploadingItem(itemNumber);
@@ -769,6 +790,105 @@ export default function App() {
       Alert.alert('Erro', e instanceof Error ? e.message : 'Não foi possível salvar o usuário.');
     } finally {
       setEditUserSaving(false);
+    }
+  }
+
+  async function openWhatsappModal(itemNumber: number | null) {
+    setWaTargetItemNum(itemNumber);
+    setWaCustomMsg('');
+    setWaModalOpen(true);
+    if (token && isAdmin && usersList.length === 0) {
+      try {
+        setUsersList(await apiGetUsers(token));
+      } catch {
+        // ignora se offline
+      }
+    }
+  }
+
+  function buildWhatsappText(
+    targetName: string,
+    itemNumber: number | null,
+    pendingNums: number[]
+  ): string {
+    if (waCustomMsg.trim()) return waCustomMsg.trim();
+    const accTitle = selectedDetail?.title || 'Prestação de Contas';
+    const deadline = selectedDetail?.deadline || 'Não definido';
+    if (itemNumber !== null) {
+      const found = selectedDetail?.items.find((i) => i.item_number === itemNumber);
+      const numPad = String(itemNumber).padStart(2, '0');
+      const label = found?.title ? ` — ${found.title}` : '';
+      return (
+        `Olá, ${targetName}! 👋\n\n` +
+        `Lembrete da *Prestação de Contas: ${accTitle}* (Prazo: ${deadline}).\n\n` +
+        `Ainda aguardamos o envio dos anexos do *Item ${numPad}${label}*.\n\n` +
+        `Por favor, acesse o aplicativo Prestação de Contas para anexar os documentos e confirmar o envio. Obrigado!`
+      );
+    }
+    const itensStr =
+      pendingNums.length > 0
+        ? `Itens pendentes: ${pendingNums.map((n) => String(n).padStart(2, '0')).join(', ')}.`
+        : 'Você possui itens pendentes de envio nesta prestação de contas.';
+    return (
+      `Olá, ${targetName}! 👋\n\n` +
+      `Lembrete da *Prestação de Contas: ${accTitle}* (Prazo: ${deadline}).\n\n` +
+      `${itensStr}\n\n` +
+      `Por favor, acesse o aplicativo Prestação de Contas para anexar os documentos e confirmar o envio. Obrigado!`
+    );
+  }
+
+  async function handleSendWhatsappReminder(
+    targetUser: { id: number; name: string; whatsapp: string },
+    pendingNums: number[],
+    mode: 'phone' | 'api'
+  ) {
+    if (!token || !selectedDetail) return;
+    let digits = (targetUser.whatsapp || '').replace(/\D/g, '');
+    if (digits.length < 10) {
+      Alert.alert(
+        'Sem WhatsApp',
+        `${targetUser.name} não possui número de WhatsApp cadastrado. Cadastre em Usuários e Permissões.`
+      );
+      return;
+    }
+    if (digits.length <= 11 && !digits.startsWith('55')) {
+      digits = '55' + digits;
+    }
+
+    const msgText = buildWhatsappText(targetUser.name, waTargetItemNum, pendingNums);
+
+    if (mode === 'phone') {
+      const waUrl = `https://wa.me/${digits}?text=${encodeURIComponent(msgText)}`;
+      try {
+        await Linking.openURL(waUrl);
+      } catch {
+        Alert.alert('Erro', 'Não foi possível abrir o WhatsApp no celular.');
+      }
+      return;
+    }
+
+    setWaSendingUserId(targetUser.id);
+    try {
+      const res = await apiRemindWhatsapp(token, selectedDetail.id, {
+        user_id: targetUser.id,
+        item_number: waTargetItemNum ?? undefined,
+        custom_message: msgText,
+      });
+      if (res.sent_via_api) {
+        Alert.alert('Enviado!', res.message);
+      } else {
+        Alert.alert(
+          'Abrir no WhatsApp',
+          'A API automática do WhatsApp não está ativa no servidor. Abrindo a mensagem direto no WhatsApp do celular.'
+        );
+        if (res.wa_url) {
+          await Linking.openURL(res.wa_url);
+        }
+      }
+    } catch (e: unknown) {
+      Alert.alert('Erro', e instanceof Error ? e.message : 'Não foi possível enviar a cobrança.');
+    } finally {
+      setWaSendingUserId(null);
     }
   }
 
@@ -1161,6 +1281,141 @@ export default function App() {
         ? selectedDetail.items.find((i) => i.item_number === selectedItemNumber) || null
         : null;
 
+    const renderWhatsappModal = () =>
+      isAdmin ? (
+        <Modal
+          visible={waModalOpen}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setWaModalOpen(false)}
+        >
+          <View style={styles.formModalBackdrop}>
+            <View style={styles.formModalCard}>
+              <View style={styles.formModalHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                  <FontAwesome5 name="whatsapp" size={18} color="#16a34a" />
+                  <Text style={styles.formModalTitle} numberOfLines={1}>
+                    {waTargetItemNum !== null
+                      ? `Cobrar Item ${String(waTargetItemNum).padStart(2, '0')}`
+                      : 'Cobrar / Lembrar no WhatsApp'}
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={() => setWaModalOpen(false)}>
+                  <FontAwesome5 name="times" size={18} color={COLORS.muted} />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView keyboardShouldPersistTaps="handled">
+                <Text style={styles.label}>Mensagem personalizada (opcional)</Text>
+                <TextInput
+                  style={[styles.input, { minHeight: 64, textAlignVertical: 'top', marginBottom: 12 }]}
+                  value={waCustomMsg}
+                  onChangeText={setWaCustomMsg}
+                  multiline
+                  placeholder="Deixe em branco para usar o texto automático de cobrança/lembrete."
+                  placeholderTextColor="#94a3b8"
+                />
+
+                <Text style={styles.profileSectionTitle}>SELECIONE O USUÁRIO PARA COBRAR</Text>
+
+                {(() => {
+                  const userMap = new Map<
+                    number,
+                    { id: number; name: string; whatsapp: string; pendingItems: number[] }
+                  >();
+                  const relevantItems =
+                    waTargetItemNum !== null
+                      ? selectedDetail.items.filter((i) => i.item_number === waTargetItemNum)
+                      : selectedDetail.items.filter((i) => i.status !== 'confirmado');
+
+                  for (const it of relevantItems) {
+                    for (const u of it.assigned_users || []) {
+                      const cur = userMap.get(u.id) || {
+                        id: u.id,
+                        name: u.name,
+                        whatsapp: u.whatsapp,
+                        pendingItems: [],
+                      };
+                      if (!cur.pendingItems.includes(it.item_number)) {
+                        cur.pendingItems.push(it.item_number);
+                      }
+                      userMap.set(u.id, cur);
+                    }
+                  }
+
+                  if (userMap.size === 0) {
+                    for (const u of usersList.filter((x) => x.role !== 'admin')) {
+                      userMap.set(u.id, {
+                        id: u.id,
+                        name: u.name,
+                        whatsapp: u.whatsapp || '',
+                        pendingItems: [],
+                      });
+                    }
+                  }
+
+                  const targets = Array.from(userMap.values());
+                  if (targets.length === 0) {
+                    return (
+                      <Text style={[styles.emptyText, { marginTop: 12, marginBottom: 12 }]}>
+                        Nenhum usuário com WhatsApp disponível para cobrança.
+                      </Text>
+                    );
+                  }
+
+                  return targets.map((t) => {
+                    const hasPhone = (t.whatsapp || '').replace(/\D/g, '').length >= 10;
+                    const sending = waSendingUserId === t.id;
+                    return (
+                      <View key={t.id} style={styles.waUserCard}>
+                        <Text style={styles.waUserName}>{t.name}</Text>
+                        <Text style={styles.waUserSub}>
+                          WhatsApp: {t.whatsapp || 'Não cadastrado'}
+                        </Text>
+                        {t.pendingItems.length > 0 && (
+                          <Text style={styles.waUserItems}>
+                            Itens: {t.pendingItems.map((n) => String(n).padStart(2, '0')).join(', ')}
+                          </Text>
+                        )}
+
+                        <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+                          <TouchableOpacity
+                            style={[styles.waSendPhoneBtn, !hasPhone && { opacity: 0.5 }]}
+                            onPress={() => handleSendWhatsappReminder(t, t.pendingItems, 'phone')}
+                            disabled={sending}
+                          >
+                            <FontAwesome5 name="whatsapp" size={13} color="#ffffff" />
+                            <Text style={styles.waSendBtnText}>WhatsApp (Celular)</Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={[
+                              styles.waSendApiBtn,
+                              (!hasPhone || sending) && { opacity: 0.6 },
+                            ]}
+                            onPress={() => handleSendWhatsappReminder(t, t.pendingItems, 'api')}
+                            disabled={sending}
+                          >
+                            {sending ? (
+                              <ActivityIndicator size="small" color={COLORS.shieldDark} />
+                            ) : (
+                              <>
+                                <FontAwesome5 name="robot" size={12} color={COLORS.shieldDark} />
+                                <Text style={styles.waSendApiText}>Via API</Text>
+                              </>
+                            )}
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    );
+                  });
+                })()}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+      ) : null;
+
     if (openedItem) {
       const st = STATUS_STYLE[openedItem.status] || STATUS_STYLE.pendente;
       const numPad = String(openedItem.item_number).padStart(2, '0');
@@ -1198,6 +1453,16 @@ export default function App() {
               {openedItem.rejection_reason ? (
                 <Text style={styles.rejectText}>Motivo rejeição: {openedItem.rejection_reason}</Text>
               ) : null}
+
+              {isAdmin && openedItem.status !== 'confirmado' && (
+                <TouchableOpacity
+                  style={styles.waActionBtn}
+                  onPress={() => openWhatsappModal(openedItem.item_number)}
+                >
+                  <FontAwesome5 name="whatsapp" size={15} color="#ffffff" />
+                  <Text style={styles.waActionBtnText}>Cobrar / Lembrar no WhatsApp</Text>
+                </TouchableOpacity>
+              )}
             </View>
 
             <Text style={styles.menuSectionLabel}>
@@ -1378,6 +1643,7 @@ export default function App() {
               )}
             </View>
           </Modal>
+          {renderWhatsappModal()}
         </SafeAreaView>
       );
     }
@@ -1405,6 +1671,17 @@ export default function App() {
           data={selectedDetail.items}
           keyExtractor={(item) => String(item.item_number)}
           contentContainerStyle={{ padding: 14, paddingBottom: 32 }}
+          ListHeaderComponent={
+            isAdmin ? (
+              <TouchableOpacity
+                style={[styles.waActionBtn, { marginTop: 0, marginBottom: 12 }]}
+                onPress={() => openWhatsappModal(null)}
+              >
+                <FontAwesome5 name="whatsapp" size={16} color="#ffffff" />
+                <Text style={styles.waActionBtnText}>Cobrar / Lembrar Usuário via WhatsApp</Text>
+              </TouchableOpacity>
+            ) : undefined
+          }
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={() => openDetail(selectedDetail.id)} />
           }
@@ -1484,6 +1761,9 @@ export default function App() {
             ) : undefined
           }
         />
+
+        {/* Modal de Cobrança / Lembrete por WhatsApp (Admin) */}
+        {renderWhatsappModal()}
       </SafeAreaView>
     );
   }
@@ -1717,11 +1997,40 @@ export default function App() {
                     <TextInput
                       style={styles.input}
                       value={newAccDeadline}
-                      onChangeText={setNewAccDeadline}
-                      keyboardType="numbers-and-punctuation"
-                      placeholder="Ex: 30/06/2026"
+                      onChangeText={(txt) => setNewAccDeadline(formatDateMask(txt))}
+                      keyboardType="number-pad"
+                      maxLength={10}
+                      placeholder="DD/MM/AAAA"
                       placeholderTextColor="#94a3b8"
                     />
+                    <View style={{ flexDirection: 'row', gap: 6, marginTop: 7, flexWrap: 'wrap' }}>
+                      <TouchableOpacity
+                        style={styles.permQuickBtn}
+                        onPress={() => setNewAccDeadline(formatDateFromOffset(15))}
+                      >
+                        <Text style={styles.permQuickBtnText}>+15 dias</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.permQuickBtn}
+                        onPress={() => setNewAccDeadline(formatDateFromOffset(30))}
+                      >
+                        <Text style={styles.permQuickBtnText}>+30 dias</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.permQuickBtn}
+                        onPress={() => setNewAccDeadline(formatEndOfMonth())}
+                      >
+                        <Text style={styles.permQuickBtnText}>Fim do mês</Text>
+                      </TouchableOpacity>
+                      {newAccDeadline !== '' && (
+                        <TouchableOpacity
+                          style={styles.permQuickBtn}
+                          onPress={() => setNewAccDeadline('')}
+                        >
+                          <Text style={[styles.permQuickBtnText, { color: '#b91c1c' }]}>Limpar</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
 
                     <View style={styles.profileDivider} />
 
@@ -3255,6 +3564,78 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.text,
     lineHeight: 18,
+  },
+  waActionBtn: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#16a34a',
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    borderRadius: 9,
+  },
+  waActionBtnText: {
+    color: '#ffffff',
+    fontWeight: '800',
+    fontSize: 13,
+  },
+  waUserCard: {
+    backgroundColor: COLORS.bg,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 10,
+  },
+  waUserName: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: COLORS.shieldDark,
+  },
+  waUserSub: {
+    fontSize: 12,
+    color: COLORS.muted,
+    marginTop: 2,
+  },
+  waUserItems: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.orangeText,
+    marginTop: 4,
+  },
+  waSendPhoneBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#16a34a',
+    paddingVertical: 9,
+    borderRadius: 8,
+  },
+  waSendBtnText: {
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  waSendApiBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#e0ecff',
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 8,
+  },
+  waSendApiText: {
+    color: COLORS.shieldDark,
+    fontWeight: '700',
+    fontSize: 12,
   },
 
   /* Rodapé fixo com ícones */

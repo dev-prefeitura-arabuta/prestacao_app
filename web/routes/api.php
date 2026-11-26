@@ -23,6 +23,8 @@ Route::prefix('mobile')->group(function () {
         ->whereNumber('itemNumber');
     Route::post('accountabilities/{id}/submit', [MobileApiController::class, 'submitAccountability'])
         ->whereNumber('id');
+    Route::post('accountabilities/{id}/remind-whatsapp', [MobileApiController::class, 'remindWhatsapp'])
+        ->whereNumber('id');
     Route::get('attachments/{attachmentId}/preview', [MobileApiController::class, 'previewAttachment'])
         ->whereNumber('attachmentId');
     Route::delete('attachments/{attachmentId}', [MobileApiController::class, 'deleteAttachment'])

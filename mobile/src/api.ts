@@ -5,7 +5,7 @@ const TOKEN_KEY = '@prestacao_token';
 const USER_KEY = '@prestacao_user';
 const API_URL_KEY = '@prestacao_api_url';
 
-export const DEFAULT_API_URL = 'http://192.168.11.4:8000';
+export const DEFAULT_API_URL = 'https://prestacao.sidelabs.com.br';
 
 export interface MobileUser {
   id: number;
@@ -40,6 +40,11 @@ export interface ChecklistItem {
     file_size: number;
     created_at: string;
   }>;
+  assigned_users?: Array<{
+    id: number;
+    name: string;
+    whatsapp: string;
+  }>;
 }
 
 export interface AccountabilityDetail {
@@ -54,7 +59,12 @@ export interface AccountabilityDetail {
 
 export async function getApiUrl(): Promise<string> {
   const saved = (await AsyncStorage.getItem(API_URL_KEY))?.trim().replace(/\/+$/, '');
-  if (!saved || saved === 'http://localhost:8000' || saved === 'http://10.0.2.2:8000') {
+  if (
+    !saved ||
+    saved === 'http://localhost:8000' ||
+    saved === 'http://10.0.2.2:8000' ||
+    saved === 'http://192.168.11.4:8000'
+  ) {
     await AsyncStorage.setItem(API_URL_KEY, DEFAULT_API_URL);
     return DEFAULT_API_URL;
   }
@@ -230,6 +240,18 @@ export async function apiGetAccountabilityDetail(
   return data.data;
 }
 
+async function parseJsonSafe(res: Response, fallbackMsg: string): Promise<any> {
+  const raw = await res.text();
+  try {
+    return JSON.parse(raw);
+  } catch {
+    if (res.status === 413) {
+      throw new Error('A imagem é muito grande para o servidor (HTTP 413). Tente uma foto menor.');
+    }
+    throw new Error(`${fallbackMsg} (HTTP ${res.status})`);
+  }
+}
+
 export async function apiUploadAttachment(
   token: string,
   accountabilityId: number,
@@ -238,15 +260,18 @@ export async function apiUploadAttachment(
 ): Promise<void> {
   const baseUrl = await getApiUrl();
   const formData = new FormData();
+  const safeMime = file.mimeType || 'image/jpeg';
+  const safeName = file.name && file.name.includes('.') ? file.name : `anexo_${Date.now()}.jpg`;
+
   if (Platform.OS === 'web') {
     const blobRes = await fetch(file.uri);
     const blob = await blobRes.blob();
-    formData.append('file', blob, file.name);
+    formData.append('file', blob, safeName);
   } else {
     formData.append('file', {
       uri: file.uri,
-      name: file.name,
-      type: file.mimeType || 'application/octet-stream',
+      name: safeName,
+      type: safeMime,
     } as unknown as Blob);
   }
 
@@ -261,7 +286,7 @@ export async function apiUploadAttachment(
       body: formData,
     }
   );
-  const data = await res.json();
+  const data = await parseJsonSafe(res, 'Erro ao enviar arquivo');
   if (!res.ok || !data.success) {
     throw new Error(data.error || 'Erro ao enviar arquivo.');
   }
@@ -303,6 +328,35 @@ export async function apiDeleteAttachment(
     throw new Error(data.error || 'Erro ao remover anexo.');
   }
   return data.message || 'Anexo removido com sucesso!';
+}
+
+export async function apiRemindWhatsapp(
+  token: string,
+  accountabilityId: number,
+  payload: { user_id: number; item_number?: number; custom_message?: string }
+): Promise<{ sent_via_api: boolean; message: string; wa_url: string }> {
+  const baseUrl = await getApiUrl();
+  const res = await fetch(
+    `${baseUrl}/api/mobile/accountabilities/${accountabilityId}/remind-whatsapp`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify(payload),
+    }
+  );
+  const data = await res.json();
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || 'Erro ao enviar cobrança por WhatsApp.');
+  }
+  return {
+    sent_via_api: !!data.sent_via_api,
+    message: data.message || 'Cobrança processada!',
+    wa_url: data.wa_url || '',
+  };
 }
 
 export async function apiGetAnnualHistory(
@@ -506,7 +560,7 @@ export async function apiUpdateProfile(
     },
     body: formData,
   });
-  const data = await res.json();
+  const data = await parseJsonSafe(res, 'Erro ao atualizar perfil');
   if (!res.ok || !data.success) {
     throw new Error(data.error || 'Erro ao atualizar perfil.');
   }

@@ -16,6 +16,7 @@ use App\Models\User;
 use App\Models\UserAccountabilityPermission;
 use App\Models\WhatsappConfig;
 use App\Services\GeminiSummaryService;
+use App\Services\OpenWaService;
 use App\Services\SmtpMailService;
 use App\Services\SpreadsheetAiExtractorService;
 use Illuminate\Http\Request;
@@ -25,7 +26,7 @@ use Throwable;
 
 class MobileApiController extends Controller
 {
-    private array $allowedExtensions = ['zip', 'jpg', 'jpeg', 'png', 'pdf'];
+    private array $allowedExtensions = ['zip', 'jpg', 'jpeg', 'png', 'webp', 'pdf'];
     private array $allowedAvatarExtensions = ['jpg', 'jpeg', 'png', 'webp'];
 
     public function ping()
@@ -271,17 +272,21 @@ class MobileApiController extends Controller
             if ($request->hasFile('avatar')) {
                 $avatarFile = $request->file('avatar');
                 if (! $avatarFile->isValid()) {
+                    $errCode = $avatarFile->getError();
+                    if (in_array($errCode, [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true)) {
+                        return response()->json(['success' => false, 'error' => 'A foto excede o limite de tamanho permitido pelo servidor.'], 413);
+                    }
                     return response()->json(['success' => false, 'error' => 'Não foi possível processar a imagem enviada.'], 422);
                 }
 
                 $ext = strtolower((string) $avatarFile->getClientOriginalExtension());
-                if ($ext === '') {
-                    $mime = (string) $avatarFile->getMimeType();
+                if ($ext === '' || ! in_array($ext, $this->allowedAvatarExtensions, true)) {
+                    $mime = strtolower((string) $avatarFile->getMimeType());
                     $ext  = match ($mime) {
-                        'image/jpeg' => 'jpg',
-                        'image/png'  => 'png',
-                        'image/webp' => 'webp',
-                        default      => '',
+                        'image/jpeg', 'image/jpg', 'image/pjpeg' => 'jpg',
+                        'image/png'                              => 'png',
+                        'image/webp'                             => 'webp',
+                        default                                  => $ext,
                     };
                 }
 
@@ -374,7 +379,16 @@ class MobileApiController extends Controller
             abort(404);
         }
 
+        $ext  = strtolower(pathinfo($fullPath, PATHINFO_EXTENSION));
+        $mime = match ($ext) {
+            'jpg', 'jpeg' => 'image/jpeg',
+            'png'         => 'image/png',
+            'webp'        => 'image/webp',
+            default       => 'application/octet-stream',
+        };
+
         return response()->file($fullPath, [
+            'Content-Type'  => $mime,
             'Cache-Control' => 'no-cache, must-revalidate',
         ]);
     }
@@ -638,6 +652,25 @@ class MobileApiController extends Controller
             }
         }
 
+        $usersByItem = [];
+        if ($isAdmin) {
+            $nonAdminUsers = [];
+            foreach (User::where('role', '!=', 'admin')->orderBy('name', 'asc')->get() as $u) {
+                $nonAdminUsers[(int) $u->id] = [
+                    'id'       => (int) $u->id,
+                    'name'     => (string) $u->name,
+                    'whatsapp' => (string) ($u->whatsapp ?? ''),
+                ];
+            }
+            foreach (UserAccountabilityPermission::all() as $perm) {
+                $uid = (int) $perm->user_id;
+                $in  = (int) $perm->item_number;
+                if (isset($nonAdminUsers[$uid])) {
+                    $usersByItem[$in][$uid] = $nonAdminUsers[$uid];
+                }
+            }
+        }
+
         $checklist          = [];
         $allItemsFilled     = true;
         $hasSubmittableItem = false;
@@ -660,6 +693,7 @@ class MobileApiController extends Controller
                 'status'           => $st,
                 'rejection_reason' => $reasons[$num] ?? '',
                 'attachments'      => $atts,
+                'assigned_users'   => array_values($usersByItem[$num] ?? []),
             ];
         }
 
@@ -750,6 +784,99 @@ class MobileApiController extends Controller
         }
     }
 
+    public function remindWhatsapp(Request $request, int $id)
+    {
+        $admin = $this->authenticate($request);
+        if (! $admin || $admin->role !== 'admin') {
+            return response()->json(['success' => false, 'error' => 'Acesso restrito a administradores.'], 403);
+        }
+
+        $acc = Accountability::find($id);
+        if (! $acc) {
+            return response()->json(['success' => false, 'error' => 'Prestação de contas não encontrada.'], 404);
+        }
+
+        $targetUserId = (int) $request->input('user_id', 0);
+        $targetUser   = User::find($targetUserId);
+        if (! $targetUser) {
+            return response()->json(['success' => false, 'error' => 'Usuário não encontrado.'], 404);
+        }
+
+        $digits = preg_replace('/\D/', '', (string) ($targetUser->whatsapp ?? '')) ?? '';
+        if (strlen($digits) < 10) {
+            return response()->json(['success' => false, 'error' => 'Este usuário não possui número de WhatsApp cadastrado.'], 422);
+        }
+        if (strlen($digits) <= 11 && ! str_starts_with($digits, '55')) {
+            $digits = '55' . $digits;
+        }
+
+        $itemNumber = (int) $request->input('item_number', 0);
+        $customText = trim((string) $request->input('custom_message', ''));
+        $deadline   = ! empty($acc->deadline) ? date('d/m/Y', strtotime((string) $acc->deadline)) : 'Não definido';
+
+        if ($customText !== '') {
+            $text = $customText;
+        } else {
+            $allItems = Accountability::getItems();
+            if ($itemNumber > 0 && isset($allItems[$itemNumber])) {
+                $itemLabel = rtrim((string) $allItems[$itemNumber], ';.');
+                $numPad    = str_pad((string) $itemNumber, 2, '0', STR_PAD_LEFT);
+                $text      = "Olá, {$targetUser->name}! 👋\n\n"
+                    . "Lembrete da *Prestação de Contas: {$acc->title}* (Prazo: {$deadline}).\n\n"
+                    . "Ainda aguardamos o envio dos anexos do *Item {$numPad} — {$itemLabel}*.\n\n"
+                    . "Por favor, acesse o aplicativo Prestação de Contas para anexar os documentos e confirmar o envio. Obrigado!";
+            } else {
+                $text = "Olá, {$targetUser->name}! 👋\n\n"
+                    . "Lembrete da *Prestação de Contas: {$acc->title}* (Prazo: {$deadline}).\n\n"
+                    . "Você possui itens pendentes de envio nesta prestação de contas.\n\n"
+                    . "Por favor, acesse o aplicativo Prestação de Contas para anexar os documentos e confirmar o envio. Obrigado!";
+            }
+        }
+
+        $waUrl      = 'https://wa.me/' . $digits . '?text=' . rawurlencode($text);
+        $sentViaApi = false;
+        $apiNote    = '';
+
+        try {
+            $waCfg = WhatsappConfig::first();
+            if ($waCfg && (int) ($waCfg->status ?? 0) === 1) {
+                $waService = new OpenWaService();
+                $res       = $waService->sendText($digits, $text);
+                if (! empty($res['success'])) {
+                    $sentViaApi = true;
+                } else {
+                    $apiNote = (string) ($res['error'] ?? 'API WhatsApp indisponível no servidor.');
+                }
+            } else {
+                $apiNote = 'API OpenWA não ativa no servidor; abrindo WhatsApp no celular.';
+            }
+        } catch (Throwable $e) {
+            $apiNote = $e->getMessage();
+        }
+
+        try {
+            $itemInfo = $itemNumber > 0 ? " (Item {$itemNumber})" : '';
+            AccountabilityHistory::create([
+                'accountability_id' => $id,
+                'user_id'           => (int) $admin->id,
+                'user_name'         => (string) $admin->name,
+                'action'            => "Enviou cobrança/lembrete via WhatsApp para {$targetUser->name}{$itemInfo}",
+                'created_at'        => now()->format('Y-m-d H:i:s'),
+            ]);
+        } catch (Throwable) {
+        }
+
+        return response()->json([
+            'success'      => true,
+            'sent_via_api' => $sentViaApi,
+            'message'      => $sentViaApi
+                ? "Cobrança enviada automaticamente para {$targetUser->name} via WhatsApp!"
+                : $apiNote,
+            'wa_url'       => $waUrl,
+            'text'         => $text,
+        ]);
+    }
+
     public function uploadAttachment(Request $request, int $id, int $itemNumber)
     {
         $user = $this->authenticate($request);
@@ -757,37 +884,77 @@ class MobileApiController extends Controller
             return response()->json(['success' => false, 'error' => 'Não autenticado.'], 401);
         }
 
+        if ($user->role !== 'admin') {
+            $allowed = UserAccountabilityPermission::getAllowedItemsForUser((int) $user->id);
+            if (! in_array($itemNumber, $allowed, true)) {
+                return response()->json(['success' => false, 'error' => 'Você não tem permissão para anexar arquivos neste item.'], 403);
+            }
+            $st = AccountabilityItemStatus::where('accountability_id', $id)
+                ->where('item_number', $itemNumber)
+                ->first();
+            if ($st && $st->status === 'confirmado') {
+                return response()->json(['success' => false, 'error' => 'Este item já foi confirmado pelo administrador.'], 403);
+            }
+        }
+
         $file = $request->file('file');
-        if (! $file || ! $file->isValid()) {
-            return response()->json(['success' => false, 'error' => 'Nenhum arquivo válido enviado.'], 422);
+        if (! $file) {
+            return response()->json(['success' => false, 'error' => 'Nenhum arquivo recebido. Se a foto for muito grande, tente novamente com menor resolução.'], 422);
+        }
+        if (! $file->isValid()) {
+            $errCode = $file->getError();
+            if (in_array($errCode, [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true)) {
+                return response()->json(['success' => false, 'error' => 'O arquivo excede o tamanho máximo permitido pelo servidor.'], 413);
+            }
+            return response()->json(['success' => false, 'error' => 'Arquivo inválido ou corrompido durante o envio.'], 422);
+        }
+
+        if ($file->getSize() > 15 * 1024 * 1024) {
+            return response()->json(['success' => false, 'error' => 'O arquivo deve ter no máximo 15 MB.'], 413);
         }
 
         $ext = strtolower((string) $file->getClientOriginalExtension());
+        if ($ext === '' || ! in_array($ext, $this->allowedExtensions, true)) {
+            $mime = strtolower((string) $file->getMimeType());
+            $ext  = match ($mime) {
+                'image/jpeg', 'image/jpg', 'image/pjpeg' => 'jpg',
+                'image/png'                              => 'png',
+                'image/webp'                             => 'webp',
+                'application/pdf'                        => 'pdf',
+                'application/zip', 'application/x-zip-compressed' => 'zip',
+                default                                  => $ext,
+            };
+        }
+
         if (! in_array($ext, $this->allowedExtensions, true)) {
-            return response()->json(['success' => false, 'error' => 'Formato inválido. Use PDF, JPG, PNG ou ZIP.'], 422);
+            return response()->json(['success' => false, 'error' => 'Formato inválido. Use PDF, JPG, PNG, WEBP ou ZIP.'], 422);
         }
 
-        $targetDir = storage_path('app/uploads/accountability/' . $id . '/item_' . $itemNumber);
-        if (! is_dir($targetDir)) {
-            mkdir($targetDir, 0775, true);
+        try {
+            $targetDir = storage_path('app/uploads/accountability/' . $id . '/item_' . $itemNumber);
+            if (! is_dir($targetDir) && ! @mkdir($targetDir, 0775, true) && ! is_dir($targetDir)) {
+                return response()->json(['success' => false, 'error' => 'Não foi possível criar o diretório de uploads no servidor.'], 500);
+            }
+
+            $origName = $file->getClientOriginalName() ?: ('anexo_' . time() . '.' . $ext);
+            $size     = (int) $file->getSize();
+            $newName  = time() . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
+            $file->move($targetDir, $newName);
+
+            $attModel = AccountabilityAttachment::create([
+                'accountability_id' => $id,
+                'item_number'       => $itemNumber,
+                'user_id'           => (int) $user->id,
+                'original_name'     => $origName,
+                'file_name'         => $newName,
+                'file_path'         => 'uploads/accountability/' . $id . '/item_' . $itemNumber . '/' . $newName,
+                'file_ext'          => $ext,
+                'file_size'         => $size,
+                'created_at'        => now()->format('Y-m-d H:i:s'),
+            ]);
+        } catch (Throwable $e) {
+            return response()->json(['success' => false, 'error' => 'Erro ao salvar anexo no servidor: ' . $e->getMessage()], 500);
         }
-
-        $origName = $file->getClientOriginalName();
-        $size     = (int) $file->getSize();
-        $newName  = time() . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
-        $file->move($targetDir, $newName);
-
-        $attModel = AccountabilityAttachment::create([
-            'accountability_id' => $id,
-            'item_number'       => $itemNumber,
-            'user_id'           => (int) $user->id,
-            'original_name'     => $origName,
-            'file_name'         => $newName,
-            'file_path'         => 'uploads/accountability/' . $id . '/item_' . $itemNumber . '/' . $newName,
-            'file_ext'          => $ext,
-            'file_size'         => $size,
-            'created_at'        => now()->format('Y-m-d H:i:s'),
-        ]);
 
         // Extração automática para a planilha via IA/OCR
         try {
@@ -863,11 +1030,12 @@ class MobileApiController extends Controller
             default      => 'application/octet-stream',
         };
 
-        $safeName = str_replace('"', '', (string) $att->original_name);
+        $origName  = (string) ($att->original_name ?: ('anexo.' . $ext));
+        $asciiName = preg_replace('/[^A-Za-z0-9._-]/', '_', $origName) ?: ('anexo.' . $ext);
 
         return response()->file($fullPath, [
             'Content-Type'        => $mime,
-            'Content-Disposition' => 'inline; filename="' . $safeName . '"',
+            'Content-Disposition' => 'inline; filename="' . $asciiName . '"; filename*=UTF-8\'\'' . rawurlencode($origName),
             'Cache-Control'       => 'no-cache, must-revalidate',
         ]);
     }
