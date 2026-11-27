@@ -1,0 +1,28 @@
+export const ALL_CHECKLIST_ITEMS: Array<{ item_number: number; title: string }> = [
+  { item_number: 1, title: 'Balancete de prestação de contas - receita/despesa/saldos' },
+  { item_number: 2, title: 'Cópias das notas de empenho' },
+  { item_number: 3, title: 'Cópias de notas fiscais' },
+  { item_number: 4, title: 'Comprovante de pagamento de encargos tributários incidentes sobre cada etapa executada' },
+  { item_number: 5, title: 'Ordem de serviço' },
+  { item_number: 6, title: 'Medição do período completo' },
+  { item_number: 7, title: 'Laudo técnico de engenharia - relatório simplificado com descrição das etapas executadas' },
+  { item_number: 8, title: 'Acervo fotográfico atual do objeto' },
+  { item_number: 9, title: 'Relação de bens adquiridos/produzidos/construídos' },
+  { item_number: 10, title: 'Anotação de Responsabilidade Técnica (ART) de execução e fiscalização' },
+  { item_number: 11, title: 'Aporte da contrapartida - comprovado no extrato bancário da conta específica' },
+  { item_number: 12, title: 'Execução da contrapartida - quando em bens e serviços' },
+  { item_number: 13, title: 'Extrato bancário com movimentação completa do período' },
+  { item_number: 14, title: 'Extrato bancário completo da aplicação financeira' },
+  { item_number: 15, title: 'Conciliação bancária (se houver)' },
+  { item_number: 16, title: 'Identificação oficial da marca do Governo do Estado - placa de obras' },
+  { item_number: 17, title: 'Cadastro Nacional de Obras (CNO) - até 30 (trinta) dias do início da obra' },
+  { item_number: 18, title: 'Parecer do órgão de controle interno municipal' },
+  { item_number: 19, title: 'Certidão Negativa de Débitos (CND) da obra - final de obras' },
+  { item_number: 20, title: 'Comprovante de devolução de saldos' },
+  { item_number: 21, title: 'Comprovante de recolhimento de rendimento de recursos' },
+  { item_number: 22, title: 'Relatório de execução físico-financeira' },
+  { item_number: 23, title: 'Termo de aceitação definitiva do objeto' },
+  { item_number: 24, title: 'Termo de encerramento da execução do objeto - fim da execução dos recursos, para consolidação do Termo de Compromisso' },
+];
+
+export const ALL_CHECKLIST_NUMS = ALL_CHECKLIST_ITEMS.map((i) => i.item_number);

@@ -4,8 +4,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const TOKEN_KEY = '@prestacao_token';
 const USER_KEY = '@prestacao_user';
 const API_URL_KEY = '@prestacao_api_url';
+const WA_QUEUE_KEY = '@prestacao_wa_retry_queue';
 
-export const DEFAULT_API_URL = 'https://prestacao.sidelabs.com.br';
+export const DEFAULT_API_URL = 'http://192.168.11.86:8000';
 
 export interface MobileUser {
   id: number;
@@ -54,6 +55,7 @@ export interface AccountabilityDetail {
   deadline: string;
   all_items_filled?: boolean;
   can_submit?: boolean;
+  admin_contacts?: Array<{ id: number; name: string; whatsapp: string }>;
   items: ChecklistItem[];
 }
 
@@ -63,7 +65,8 @@ export async function getApiUrl(): Promise<string> {
     !saved ||
     saved === 'http://localhost:8000' ||
     saved === 'http://10.0.2.2:8000' ||
-    saved === 'http://192.168.11.4:8000'
+    saved === 'http://192.168.11.4:8000' ||
+    saved === 'https://prestacao.sidelabs.com.br'
   ) {
     await AsyncStorage.setItem(API_URL_KEY, DEFAULT_API_URL);
     return DEFAULT_API_URL;
@@ -252,6 +255,69 @@ async function parseJsonSafe(res: Response, fallbackMsg: string): Promise<any> {
   }
 }
 
+async function uploadMultipart(
+  url: string,
+  token: string,
+  formData: FormData,
+  fallbackMsg: string
+): Promise<any> {
+  if (Platform.OS === 'web') {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+      },
+      body: formData,
+    });
+    const data = await parseJsonSafe(res, fallbackMsg);
+    if (!res.ok || !data?.success) {
+      throw new Error(data?.error || `${fallbackMsg} (HTTP ${res.status})`);
+    }
+    return data;
+  }
+
+  // No Android/iOS (Expo SDK 58), expo/winter/fetch rejeita { uri, name, type } no FormData
+  // ("Unsupported FormDataPart implementation"). XMLHttpRequest usa o NetworkingModule nativo do RN.
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.setRequestHeader('Accept', 'application/json');
+    xhr.timeout = 60000;
+
+    xhr.onload = () => {
+      const raw = xhr.responseText || '';
+      let data: any = null;
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        if (xhr.status === 413) {
+          reject(new Error('A imagem é muito grande para o servidor (HTTP 413). Tente uma foto menor.'));
+          return;
+        }
+        reject(new Error(`${fallbackMsg} (HTTP ${xhr.status})`));
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300 || !data?.success) {
+        reject(new Error(data?.error || `${fallbackMsg} (HTTP ${xhr.status})`));
+        return;
+      }
+      resolve(data);
+    };
+
+    xhr.onerror = () => {
+      reject(new Error('Falha de conexão ao enviar o arquivo. Verifique sua internet.'));
+    };
+
+    xhr.ontimeout = () => {
+      reject(new Error('Tempo limite excedido ao enviar o arquivo.'));
+    };
+
+    xhr.send(formData);
+  });
+}
+
 export async function apiUploadAttachment(
   token: string,
   accountabilityId: number,
@@ -275,40 +341,42 @@ export async function apiUploadAttachment(
     } as unknown as Blob);
   }
 
-  const res = await fetch(
+  await uploadMultipart(
     `${baseUrl}/api/mobile/accountabilities/${accountabilityId}/upload/${itemNumber}`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/json',
-      },
-      body: formData,
-    }
+    token,
+    formData,
+    'Erro ao enviar arquivo'
   );
-  const data = await parseJsonSafe(res, 'Erro ao enviar arquivo');
-  if (!res.ok || !data.success) {
-    throw new Error(data.error || 'Erro ao enviar arquivo.');
-  }
 }
 
 export async function apiSubmitAccountability(
   token: string,
-  accountabilityId: number
-): Promise<string> {
+  accountabilityId: number,
+  notifyAdmin = true
+): Promise<{
+  message: string;
+  notified_via_api: boolean;
+  admin_wa_links: Array<{ id: number; name: string; phone: string; url: string }>;
+}> {
   const baseUrl = await getApiUrl();
   const res = await fetch(`${baseUrl}/api/mobile/accountabilities/${accountabilityId}/submit`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
       Accept: 'application/json',
     },
+    body: JSON.stringify({ notify_admin: notifyAdmin }),
   });
   const data = await res.json();
   if (!res.ok || !data.success) {
     throw new Error(data.error || 'Não foi possível confirmar o envio.');
   }
-  return data.message || 'Envio confirmado com sucesso!';
+  return {
+    message: data.message || 'Envio confirmado com sucesso!',
+    notified_via_api: !!data.notified_via_api,
+    admin_wa_links: data.admin_wa_links || [],
+  };
 }
 
 export async function apiDeleteAttachment(
@@ -328,6 +396,124 @@ export async function apiDeleteAttachment(
     throw new Error(data.error || 'Erro ao remover anexo.');
   }
   return data.message || 'Anexo removido com sucesso!';
+}
+
+export interface PendingWaReminder {
+  id: string;
+  accountability_id: number;
+  accountability_title: string;
+  user_id: number;
+  user_name: string;
+  item_number?: number;
+  custom_message?: string;
+  created_at: string;
+  attempts: number;
+  last_error?: string;
+}
+
+export async function getWaRetryQueue(): Promise<PendingWaReminder[]> {
+  try {
+    const raw = await AsyncStorage.getItem(WA_QUEUE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveWaRetryQueue(list: PendingWaReminder[]): Promise<void> {
+  if (!list.length) {
+    await AsyncStorage.removeItem(WA_QUEUE_KEY);
+    return;
+  }
+  await AsyncStorage.setItem(WA_QUEUE_KEY, JSON.stringify(list));
+}
+
+export async function enqueueWaReminder(
+  item: Omit<PendingWaReminder, 'id' | 'created_at' | 'attempts'>
+): Promise<PendingWaReminder[]> {
+  const current = await getWaRetryQueue();
+  const next: PendingWaReminder[] = [
+    ...current,
+    {
+      ...item,
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      created_at: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      attempts: 1,
+    },
+  ];
+  await saveWaRetryQueue(next);
+  return next;
+}
+
+export async function apiTrySendWaReminder(
+  token: string,
+  accountabilityId: number,
+  payload: { user_id: number; item_number?: number; custom_message?: string }
+): Promise<{ delivered: boolean; status: number; message: string; wa_url: string }> {
+  const baseUrl = await getApiUrl();
+  try {
+    const res = await fetch(
+      `${baseUrl}/api/mobile/accountabilities/${accountabilityId}/remind-whatsapp`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+    const data = await parseJsonSafe(res, 'Falha na API WhatsApp');
+    const delivered = res.status === 200 && !!data?.success && !!data?.sent_via_api;
+    return {
+      delivered,
+      status: res.status,
+      message: data?.message || data?.error || `HTTP ${res.status}`,
+      wa_url: data?.wa_url || '',
+    };
+  } catch (e: unknown) {
+    return {
+      delivered: false,
+      status: 0,
+      message: e instanceof Error ? e.message : 'Sem conexão com o servidor.',
+      wa_url: '',
+    };
+  }
+}
+
+export async function flushWaRetryQueue(
+  token: string
+): Promise<{ sent: number; remaining: number; queue: PendingWaReminder[] }> {
+  const current = await getWaRetryQueue();
+  if (!current.length) {
+    return { sent: 0, remaining: 0, queue: [] };
+  }
+
+  let sent = 0;
+  const stillPending: PendingWaReminder[] = [];
+
+  for (const item of current) {
+    const res = await apiTrySendWaReminder(token, item.accountability_id, {
+      user_id: item.user_id,
+      item_number: item.item_number,
+      custom_message: item.custom_message,
+    });
+    if (res.delivered) {
+      sent++;
+    } else {
+      stillPending.push({
+        ...item,
+        attempts: item.attempts + 1,
+        last_error: res.message,
+      });
+    }
+  }
+
+  await saveWaRetryQueue(stillPending);
+  return { sent, remaining: stillPending.length, queue: stillPending };
 }
 
 export async function apiRemindWhatsapp(
@@ -552,18 +738,12 @@ export async function apiUpdateProfile(
     }
   }
 
-  const res = await fetch(`${baseUrl}/api/mobile/profile`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/json',
-    },
-    body: formData,
-  });
-  const data = await parseJsonSafe(res, 'Erro ao atualizar perfil');
-  if (!res.ok || !data.success) {
-    throw new Error(data.error || 'Erro ao atualizar perfil.');
-  }
+  const data = await uploadMultipart(
+    `${baseUrl}/api/mobile/profile`,
+    token,
+    formData,
+    'Erro ao atualizar perfil'
+  );
   await saveStoredUser(data.user);
   return { message: data.message || 'Perfil atualizado com sucesso!', user: data.user };
 }
@@ -583,4 +763,65 @@ export async function apiRemoveAvatar(token: string): Promise<{ message: string;
   }
   await saveStoredUser(data.user);
   return { message: data.message || 'Foto removida com sucesso!', user: data.user };
+}
+
+export interface AdminNotificationItem {
+  id: number;
+  accountability_id: number | null;
+  actor_name: string;
+  title: string;
+  message: string;
+  is_read: boolean;
+  created_at: string;
+}
+
+export async function apiGetNotifications(token: string): Promise<{
+  enabled: boolean;
+  unread_count: number;
+  items: AdminNotificationItem[];
+}> {
+  const baseUrl = await getApiUrl();
+  const res = await fetch(`${baseUrl}/api/mobile/notifications`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) {
+    return { enabled: true, unread_count: 0, items: [] };
+  }
+  return {
+    enabled: !!data.enabled,
+    unread_count: Number(data.unread_count || 0),
+    items: data.items || [],
+  };
+}
+
+export async function apiToggleNotifications(token: string, enabled: boolean): Promise<boolean> {
+  const baseUrl = await getApiUrl();
+  const res = await fetch(`${baseUrl}/api/mobile/notifications/toggle`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ enabled }),
+  });
+  const data = await res.json();
+  return data?.success ? !!data.enabled : enabled;
+}
+
+export async function apiMarkNotificationRead(token: string, id: number): Promise<void> {
+  const baseUrl = await getApiUrl();
+  await fetch(`${baseUrl}/api/mobile/notifications/${id}/read`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+  }).catch(() => {});
+}
+
+export async function apiMarkAllNotificationsRead(token: string): Promise<void> {
+  const baseUrl = await getApiUrl();
+  await fetch(`${baseUrl}/api/mobile/notifications/read-all`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+  }).catch(() => {});
 }
