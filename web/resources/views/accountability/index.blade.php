@@ -382,6 +382,10 @@
             color: #64748b;
         }
 
+        .btn-open-label {
+            display: none;
+        }
+
         @media (max-width: 768px) {
             .app-layout {
                 flex-direction: column;
@@ -389,6 +393,164 @@
 
             .container {
                 padding: 1.25rem 1rem;
+            }
+
+            /* ---------- Lista em cartões no celular ---------- */
+            #accountabilitiesTable thead {
+                display: none;
+            }
+
+            #accountabilitiesTable,
+            #accountabilitiesTable tbody {
+                display: block;
+                width: 100%;
+            }
+
+            #accountabilitiesTable tbody {
+                padding: 0.75rem;
+                display: flex;
+                flex-direction: column;
+                gap: 0.75rem;
+            }
+
+            #accountabilitiesTable tr.acc-row {
+                display: grid;
+                grid-template-columns: 1fr auto;
+                grid-template-areas:
+                    "id status"
+                    "title title"
+                    "deadline deadline"
+                    "progress progress"
+                    "actions actions";
+                gap: 0.55rem 0.75rem;
+                align-items: center;
+                padding: 0.95rem 1rem;
+                background: #ffffff;
+                border: 1px solid #e2e8f0;
+                border-left: 4px solid #cbd5e1;
+                border-radius: 12px;
+                box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+            }
+
+            #accountabilitiesTable tr.acc-row.row-overdue {
+                border-left-color: #f59e0b;
+            }
+
+            #accountabilitiesTable tr.acc-row.row-paused {
+                border-left-color: #6366f1;
+            }
+
+            #accountabilitiesTable tr.acc-row:hover {
+                background: #ffffff;
+            }
+
+            #accountabilitiesTable tr.acc-row > td {
+                display: block;
+                padding: 0;
+                border: none;
+                min-width: 0;
+            }
+
+            #accountabilitiesTable .td-id {
+                grid-area: id;
+                font-size: 0.78rem;
+                font-weight: 700;
+                color: #94a3b8;
+            }
+
+            #accountabilitiesTable .td-id::before {
+                content: "#";
+            }
+
+            #accountabilitiesTable .td-status {
+                grid-area: status;
+                justify-self: end;
+            }
+
+            #accountabilitiesTable .td-title {
+                grid-area: title;
+                font-size: 0.98rem;
+                line-height: 1.35;
+                word-break: break-word;
+            }
+
+            #accountabilitiesTable .acc-desc {
+                display: -webkit-box;
+                -webkit-line-clamp: 2;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+            }
+
+            #accountabilitiesTable .td-deadline {
+                grid-area: deadline;
+                font-size: 0.85rem;
+                color: #334155;
+            }
+
+            #accountabilitiesTable .td-deadline::before {
+                content: attr(data-label) ": ";
+                color: #64748b;
+                font-weight: 600;
+            }
+
+            #accountabilitiesTable .td-progress {
+                grid-area: progress;
+            }
+
+            #accountabilitiesTable .td-progress .progress-box {
+                width: 100%;
+                min-width: 0;
+                max-width: none;
+            }
+
+            #accountabilitiesTable .td-actions {
+                grid-area: actions;
+                padding-top: 0.6rem;
+                border-top: 1px solid #f1f5f9;
+            }
+
+            #accountabilitiesTable .actions-cell {
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+                justify-content: flex-start;
+            }
+
+            #accountabilitiesTable .actions-cell .btn-open {
+                flex: 1;
+                width: auto;
+                height: 42px;
+                gap: 0.5rem;
+                justify-content: center;
+                font-weight: 700;
+                font-size: 0.88rem;
+            }
+
+            #accountabilitiesTable .btn-open-label {
+                display: inline;
+            }
+
+            #accountabilitiesTable .actions-cell form {
+                margin: 0;
+            }
+
+            #accountabilitiesTable .actions-cell .btn-play,
+            #accountabilitiesTable .actions-cell .btn-pause,
+            #accountabilitiesTable .actions-cell .btn-edit,
+            #accountabilitiesTable .actions-cell .btn-delete {
+                width: 42px;
+                height: 42px;
+            }
+
+            /* Linha de "nenhuma prestação" ocupa o cartão todo */
+            #accountabilitiesTable tr:not(.acc-row),
+            #accountabilitiesTable tr:not(.acc-row) > td {
+                display: block;
+                border: none;
+            }
+
+            .table-responsive {
+                overflow-x: visible;
             }
         }
     </style>
@@ -491,9 +653,9 @@
                                             && $percent < 100
                                             && $st !== 'concluida';
                                         ?>
-                                        <tr class="<?= $isPaused ? 'row-paused' : '' ?>">
-                                            <td><?= esc((string) $accId) ?></td>
-                                            <td>
+                                        <tr class="acc-row <?= $isPaused ? 'row-paused' : '' ?> <?= $isOverdue ? 'row-overdue' : '' ?>">
+                                            <td class="td-id"><?= esc((string) $accId) ?></td>
+                                            <td class="td-title">
                                                 <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
                                                     <strong><?= esc($acc['title']) ?></strong>
                                                     <?php if ($isPaused): ?>
@@ -508,12 +670,12 @@
                                                     <?php endif; ?>
                                                 </div>
                                                 <?php if (! empty($acc['description'])): ?>
-                                                    <div style="font-size: 0.8rem; color: #64748b; margin-top: 0.2rem;">
+                                                    <div class="acc-desc" style="font-size: 0.8rem; color: #64748b; margin-top: 0.2rem;">
                                                         <?= esc($acc['description']) ?>
                                                     </div>
                                                 <?php endif; ?>
                                             </td>
-                                            <td>
+                                            <td class="td-deadline" data-label="Prazo">
                                                 <?php if (! empty($acc['deadline'])): ?>
                                                     <span style="<?= $isOverdue ? 'color: #b45309; font-weight: 700;' : '' ?>">
                                                         <?= esc(date('d/m/Y', strtotime((string) $acc['deadline']))) ?>
@@ -522,12 +684,12 @@
                                                     —
                                                 <?php endif; ?>
                                             </td>
-                                            <td>
+                                            <td class="td-status">
                                                 <span class="status-badge status-<?= esc($st) ?>">
                                                     <?= esc($statusLabels[$st] ?? ucfirst((string) $st)) ?>
                                                 </span>
                                             </td>
-                                            <td>
+                                            <td class="td-progress">
                                                 <?php if ($isAdmin): ?>
                                                     <?php
                                                     $barColor   = $isOverdue ? '#f59e0b' : ($percent >= 100 ? '#16a34a' : ($percent > 0 ? '#2563eb' : '#cbd5e1'));
@@ -555,10 +717,11 @@
                                                     </div>
                                                 <?php endif; ?>
                                             </td>
-                                            <td>
+                                            <td class="td-actions">
                                                 <div class="actions-cell">
                                                     <a href="<?= site_url('accountability/' . $accId) ?>" class="btn-open" title="Abrir / Visualizar prestação de contas" aria-label="Abrir">
                                                         <i class="fa-solid fa-eye"></i>
+                                                        <span class="btn-open-label">Abrir prestação</span>
                                                     </a>
 
                                                     <?php if ($isAdmin): ?>

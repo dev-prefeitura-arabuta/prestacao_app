@@ -17,6 +17,7 @@ use App\Services\AccountabilityListingService;
 use App\Services\AccountabilitySubmissionService;
 use App\Services\AttachmentService;
 use App\Services\ExtractiveAssistantService;
+use App\Services\ItemReviewService;
 use App\Services\OllamaService;
 use App\Services\SmtpMailService;
 use App\Support\Actor;
@@ -551,93 +552,93 @@ class AccountabilityController extends Controller
         }
     }
 
-    public function updateItemStatus(Request $request, int $id, int $itemNumber)
+    public function updateItemStatus(Request $request, int $id, int $itemNumber, ItemReviewService $review)
     {
-        $role          = session('user_role') ?? session('role') ?? 'user';
-        $currentUserId = (int) session('user_id');
-
-        if ($role !== 'admin') {
-            if ($request->ajax()) {
-                return response()->json(['error' => 'Apenas administradores podem alterar a situação do documento.'], 403);
-            }
-            return redirect('/accountability/' . $id)->with('error', 'Apenas administradores podem alterar a situação do documento.');
-        }
-
-        $validStatuses   = AccountabilityItemStatus::getValidStatuses();
-        $newStatus       = (string) $request->input('status');
-        $rejectionReason = trim((string) $request->input('rejection_reason'));
-
-        if (! isset($validStatuses[$newStatus])) {
-            if ($request->ajax()) {
-                return response()->json(['error' => 'Status inválido.'], 422);
-            }
-            return redirect('/accountability/' . $id . '#modal-item-' . $itemNumber)->with('error', 'Status inválido.');
-        }
-
-        if (in_array($newStatus, ['rejeitado', 'confirmado'], true)) {
-            $attCount = AccountabilityAttachment::where('accountability_id', $id)
-                ->where('item_number', $itemNumber)
-                ->count();
-
-            if ($attCount === 0) {
-                $errMsg = 'Não é possível rejeitar ou confirmar um item que ainda não possui documentos anexados.';
-                if ($request->ajax()) {
-                    return response()->json(['error' => $errMsg, 'csrf_hash' => csrf_token()], 422);
-                }
-                return redirect('/accountability/' . $id . '#modal-item-' . $itemNumber)->with('error', $errMsg);
-            }
-        }
-
-        if ($newStatus === 'rejeitado' && $rejectionReason === '') {
-            $errMsg = 'Por favor, informe o motivo da rejeição para que o usuário saiba o que corrigir.';
-            if ($request->ajax()) {
-                return response()->json(['error' => $errMsg, 'csrf_hash' => csrf_token()], 422);
-            }
-            return redirect('/accountability/' . $id . '#modal-item-' . $itemNumber)->with('error', $errMsg);
-        }
+        $backUrl = '/accountability/' . $id . '#modal-item-' . $itemNumber;
 
         try {
-            AccountabilityItemStatus::setStatus(
+            $result = $review->setStatus(
+                Actor::fromSession(),
                 $id,
                 $itemNumber,
-                $newStatus,
-                $currentUserId,
-                $newStatus === 'rejeitado' ? $rejectionReason : null
+                (string) $request->input('status'),
+                (string) $request->input('rejection_reason')
             );
-
-            // Arquivo/item rejeitado não deve constar na planilha
-            if ($newStatus === 'rejeitado') {
-                AccountabilitySpreadsheetEntry::where('accountability_id', $id)
-                    ->where('item_number', $itemNumber)
-                    ->delete();
-            }
-
-            $label   = $validStatuses[$newStatus];
-            $logText = $newStatus === 'rejeitado'
-                ? "Rejeitou o Item {$itemNumber} — Motivo: {$rejectionReason}"
-                : "Alterou situação do Item {$itemNumber} para '{$label}'";
-            $this->logHistory($id, $logText);
-
+        } catch (ActionException $e) {
             if ($request->ajax()) {
-                return response()->json([
-                    'success'          => true,
-                    'item_number'      => $itemNumber,
-                    'status'           => $newStatus,
-                    'label'            => $label,
-                    'rejection_reason' => $newStatus === 'rejeitado' ? $rejectionReason : '',
-                    'csrf_hash'        => csrf_token(),
-                ]);
+                return response()->json(['error' => $e->getMessage(), 'csrf_hash' => csrf_token()], $e->status());
             }
-
-            return redirect('/accountability/' . $id . '#modal-item-' . $itemNumber)->with('success', "Situação do Item {$itemNumber} atualizada para {$label}!");
+            return redirect($e->status() === 403 ? '/accountability/' . $id : $backUrl)->with('error', $e->getMessage());
         } catch (Throwable $e) {
+            report($e);
             if ($request->ajax()) {
-                return response()->json(['error' => $e->getMessage()], 500);
+                return response()->json(['error' => 'Erro ao atualizar status.'], 500);
             }
-            return redirect('/accountability/' . $id . '#modal-item-' . $itemNumber)->with('error', 'Erro ao atualizar status: ' . $e->getMessage());
+            return redirect($backUrl)->with('error', 'Erro ao atualizar status.');
         }
+
+        $notifiedNote = $result['notified'] > 0 ? " O usuário foi avisado do motivo ({$result['notified']})." : '';
+
+        if ($request->ajax()) {
+            return response()->json([
+                'success'          => true,
+                'item_number'      => $itemNumber,
+                'status'           => $result['status'],
+                'label'            => $result['label'],
+                'rejection_reason' => $result['rejection_reason'],
+                'notified'         => $result['notified'],
+                'csrf_hash'        => csrf_token(),
+            ]);
+        }
+
+        return redirect($backUrl)->with('success', "Situação do Item {$itemNumber} atualizada para {$result['label']}!" . $notifiedNote);
     }
 
+    public function confirmAllSent(int $id, ItemReviewService $review)
+    {
+        try {
+            $count = $review->confirmAllSent(Actor::fromSession(), $id);
+        } catch (ActionException $e) {
+            return redirect($e->status() === 404 ? '/accountability' : '/accountability/' . $id)->with('error', $e->getMessage());
+        }
+
+        return redirect('/accountability/' . $id)->with(
+            $count > 0 ? 'success' : 'error',
+            $count > 0 ? "{$count} item(ns) enviado(s) confirmado(s) de uma vez!" : 'Não há itens enviados aguardando avaliação nesta prestação.'
+        );
+    }
+
+    /**
+     * Cria uma cópia (pausada) da prestação com os mesmos itens, para o admin só ajustar título e prazo.
+     */
+    public function duplicate(int $id)
+    {
+        $role = session('user_role') ?? session('role') ?? 'user';
+        if ($role !== 'admin') {
+            return redirect('/accountability')->with('error', 'Apenas administradores podem duplicar prestações de contas.');
+        }
+
+        $source = Accountability::find($id);
+        if ($source === null) {
+            return redirect('/accountability')->with('error', 'Prestação de contas não encontrada.');
+        }
+
+        $copy = Accountability::create([
+            'title'         => mb_substr('Cópia de ' . $source->title, 0, 100),
+            'description'   => $source->description,
+            'deadline'      => null,
+            'status'        => 'aberta',
+            'is_paused'     => 1,
+            'enabled_items' => $source->enabled_items,
+        ]);
+
+        $this->logHistory((int) $copy->id, "Prestação de contas criada como cópia da #{$id}");
+
+        return redirect('/accountability/' . $copy->id . '/edit')->with(
+            'success',
+            'Cópia criada e pausada (invisível aos usuários). Ajuste o título e o prazo, salve e depois reative.'
+        );
+    }
     public function upload(Request $request, int $id, int $itemNumber, AttachmentService $attachments)
     {
         $actor    = Actor::fromSession();

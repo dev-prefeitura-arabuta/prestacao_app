@@ -522,6 +522,11 @@
                                                 <span class="badge <?= $uRole === 'admin' ? 'badge-admin' : 'badge-user' ?>">
                                                     <?= $uRole === 'admin' ? 'Administrador' : 'Usuário' ?>
                                                 </span>
+                                                <?php if ($uid === (int) ($primaryAdminId ?? 0)): ?>
+                                                    <span class="badge badge-admin" title="Sempre administrador; não pode ser excluído" style="margin-left:0.25rem;">
+                                                        <i class="fa-solid fa-lock"></i> Principal
+                                                    </span>
+                                                <?php endif; ?>
                                             </td>
                                             <td>
                                                 <div class="actions-cell">
@@ -529,7 +534,7 @@
                                                         Editar
                                                     </a>
 
-                                                    <?php if ($uid !== $currentUserId): ?>
+                                                    <?php if ($uid !== $currentUserId && $uid !== (int) ($primaryAdminId ?? 0)): ?>
                                                         <form
                                                             action="<?= site_url('users/' . $uid . '/delete') ?>"
                                                             method="post"

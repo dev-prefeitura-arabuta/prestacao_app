@@ -32,6 +32,20 @@ export function MenuScreen({
       />
 
       <MenuButton
+        icon="inbox"
+        title="Para Avaliar"
+        subtitle="Itens enviados aguardando confirmação ou rejeição"
+        onPress={() => onNavigate('review')}
+      />
+
+      <MenuButton
+        icon="user-clock"
+        title="Pendências por Pessoa"
+        subtitle="O que falta de cada usuário, com cobrança no WhatsApp"
+        onPress={() => onNavigate('pending_people')}
+      />
+
+      <MenuButton
         icon="calendar-alt"
         title="Histórico Anual"
         subtitle="Prestações finalizadas por ano"

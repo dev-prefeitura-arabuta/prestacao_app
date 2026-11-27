@@ -184,6 +184,72 @@ class MobileApiTest extends TestCase
         $this->assertSame(0, AccountabilityAttachment::count());
     }
 
+    // ---------- Fila offline: reenvio com o mesmo identificador ----------
+
+    public function test_reenvio_da_fila_offline_nao_duplica_anexo(): void
+    {
+        $this->useTempStorage();
+        $acc     = $this->makeAccountability([1]);
+        $headers = $this->mobileHeaders($this->makeUser('user', [1]));
+        $url     = '/api/mobile/accountabilities/' . $acc->id . '/upload/1';
+        $payload = fn () => [
+            'file'             => UploadedFile::fake()->create('nota.pdf', 10, 'application/pdf'),
+            'client_upload_id' => 'fila-abc12345',
+        ];
+
+        $first = $this->post($url, $payload(), $headers)->assertOk()->assertJsonPath('duplicate', false);
+        $this->post($url, $payload(), $headers)
+            ->assertOk()
+            ->assertJsonPath('duplicate', true)
+            ->assertJsonPath('attachment.id', $first->json('attachment.id'));
+
+        $this->assertSame(1, AccountabilityAttachment::count());
+        $this->assertSame('fila-abc12345', AccountabilityAttachment::firstOrFail()->client_upload_id);
+    }
+
+    public function test_reenvio_aceito_mesmo_se_item_foi_confirmado_depois(): void
+    {
+        $this->useTempStorage();
+        $acc     = $this->makeAccountability([1]);
+        $headers = $this->mobileHeaders($this->makeUser('user', [1]));
+        $url     = '/api/mobile/accountabilities/' . $acc->id . '/upload/1';
+
+        $this->post($url, ['file' => UploadedFile::fake()->create('a.pdf', 5, 'application/pdf'), 'client_upload_id' => 'fila-confirmado1'], $headers)
+            ->assertOk();
+        $this->setItemStatus($acc, 1, 'confirmado');
+
+        // A resposta do primeiro envio se perdeu: o app reenvia e recebe sucesso, sem 403
+        $this->post($url, ['file' => UploadedFile::fake()->create('a.pdf', 5, 'application/pdf'), 'client_upload_id' => 'fila-confirmado1'], $headers)
+            ->assertOk()
+            ->assertJsonPath('duplicate', true);
+    }
+
+    public function test_identificador_de_outro_usuario_nao_e_reaproveitado(): void
+    {
+        $this->useTempStorage();
+        $acc = $this->makeAccountability([1]);
+        $url = '/api/mobile/accountabilities/' . $acc->id . '/upload/1';
+
+        $this->post($url, ['file' => UploadedFile::fake()->create('a.pdf', 5, 'application/pdf'), 'client_upload_id' => 'fila-compart1'], $this->mobileHeaders($this->makeUser('user', [1])))
+            ->assertOk();
+
+        $res = $this->post($url, ['client_upload_id' => 'fila-compart1'], $this->mobileHeaders($this->makeUser('user', [1])));
+        $res->assertStatus(422);
+        $this->assertSame(1, AccountabilityAttachment::count());
+    }
+
+    public function test_identificador_invalido_e_recusado(): void
+    {
+        $acc = $this->makeAccountability([1]);
+
+        $this->post('/api/mobile/accountabilities/' . $acc->id . '/upload/1', [
+            'file'             => UploadedFile::fake()->create('a.pdf', 5, 'application/pdf'),
+            'client_upload_id' => "x'; drop",
+        ], $this->mobileHeaders($this->makeUser('user', [1])))->assertStatus(422);
+
+        $this->assertSame(0, AccountabilityAttachment::count());
+    }
+
     public function test_usuario_nao_apaga_anexo_de_outro(): void
     {
         $acc   = $this->makeAccountability([1]);

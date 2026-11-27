@@ -15,8 +15,12 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import * as DocumentPicker from 'expo-document-picker';
 import { FontAwesome5 } from '@expo/vector-icons';
-import { AccountabilityDetail, ChecklistItem, apiDeleteAttachment, apiUploadAttachment } from '../../api';
+import { AccountabilityDetail, ChecklistItem, apiDeleteAttachment, apiUploadAttachment, isNetworkError } from '../../api';
 import { ImagePreviewModal } from '../../components/ImagePreviewModal';
+import { OfflineBanner } from '../../components/OfflineBanner';
+import type { UploadQueueState } from '../../hooks/useUploadQueue';
+import { PendingUpload, newUploadId, pendingUploadUri } from '../../offline/uploadQueue';
+import { ReviewActions } from './ReviewActions';
 import { COLORS, getStatusStyle } from '../../theme/colors';
 import { styles } from '../../theme/styles';
 import { IMAGE_EXTS, errorMessage, formatFileSize, joinApiUrl, padItem } from '../../utils/format';
@@ -49,6 +53,9 @@ export function AccountabilityItemScreen({
   apiUrl,
   isAdmin,
   loading,
+  offlineSince,
+  uploads,
+  userId,
   onReload,
   onBack,
   onRemind,
@@ -59,6 +66,9 @@ export function AccountabilityItemScreen({
   apiUrl: string;
   isAdmin: boolean;
   loading: boolean;
+  offlineSince: string | null;
+  uploads: UploadQueueState;
+  userId: number;
   onReload: () => Promise<void>;
   onBack: () => void;
   onRemind: (itemNumber: number) => void;
@@ -71,15 +81,50 @@ export function AccountabilityItemScreen({
   const numPad = padItem(item.item_number);
   const canEdit = isAdmin || item.status !== 'confirmado';
 
+  const queued = uploads.pendingFor(detail.id, item.item_number);
+
   async function upload(file: { uri: string; name: string; mimeType?: string }, successMsg: string) {
     setUploading(true);
+    // O mesmo identificador vale para a tentativa direta e para a fila: um reenvio nunca duplica o anexo
+    const uploadId = newUploadId();
     try {
-      await apiUploadAttachment(token, detail.id, item.item_number, file);
+      await apiUploadAttachment(token, detail.id, item.item_number, file, uploads.supported ? uploadId : undefined);
       Alert.alert('Sucesso', successMsg);
       await onReload();
+    } catch (e: unknown) {
+      if (!uploads.supported || !isNetworkError(e)) throw e;
+      await uploads.enqueue({
+        id: uploadId,
+        userId,
+        accountabilityId: detail.id,
+        accountabilityTitle: detail.title,
+        itemNumber: item.item_number,
+        file,
+      });
+      Alert.alert(
+        'Salvo no aparelho',
+        `Sem conexão no momento. "${file.name}" foi guardado no celular e será enviado automaticamente quando a internet voltar.`
+      );
     } finally {
       setUploading(false);
     }
+  }
+
+  function handleRemoveQueued(entry: PendingUpload) {
+    Alert.alert('Remover da fila', `"${entry.name}" ainda não foi enviado. Remover do aparelho?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Remover', style: 'destructive', onPress: () => uploads.remove(entry) },
+    ]);
+  }
+
+  function handlePreviewQueued(entry: PendingUpload) {
+    const ext = (entry.name.split('.').pop() || '').toLowerCase();
+    const uri = pendingUploadUri(entry);
+    if (IMAGE_EXTS.includes(ext) || entry.mimeType.startsWith('image/')) {
+      setPreviewImage({ uri, name: entry.name });
+      return;
+    }
+    Linking.openURL(uri).catch(() => Alert.alert('Aviso', 'Este arquivo poderá ser visualizado depois de enviado.'));
   }
 
   async function handleUploadPhoto(source: ImageSource) {
@@ -174,6 +219,71 @@ export function AccountabilityItemScreen({
             </TouchableOpacity>
           )}
         </View>
+
+        {isAdmin && (
+          <ReviewActions
+            token={token}
+            accountabilityId={detail.id}
+            itemNumber={item.item_number}
+            status={item.status}
+            hasAttachments={item.attachments.length > 0}
+            presets={detail.rejection_presets}
+            offline={!!offlineSince}
+            onChanged={onReload}
+          />
+        )}
+
+        <OfflineBanner
+          offlineSince={offlineSince}
+          pendingCount={queued.filter((e) => e.status === 'pending').length}
+          flushing={uploads.flushing}
+          onRetry={uploads.flush}
+        />
+
+        {queued.length > 0 && (
+          <>
+            <Text style={styles.menuSectionLabel}>NO APARELHO, AGUARDANDO ENVIO ({queued.length})</Text>
+            {queued.map((entry) => {
+              const failed = entry.status === 'failed';
+              return (
+                <View
+                  key={entry.id}
+                  style={[styles.attCard, { borderColor: failed ? '#fecaca' : '#fde68a', backgroundColor: failed ? '#fef2f2' : '#fffbeb' }]}
+                >
+                  <View style={styles.attCardTop}>
+                    <View style={styles.attIconWrap}>
+                      <FontAwesome5
+                        name={failed ? 'exclamation-triangle' : 'cloud-upload-alt'}
+                        size={18}
+                        color={failed ? '#b91c1c' : '#b45309'}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.attCardName} numberOfLines={2}>
+                        {entry.name}
+                      </Text>
+                      <Text style={[styles.attCardMeta, { color: failed ? '#b91c1c' : '#92400e' }]}>
+                        {failed
+                          ? `Recusado pelo servidor: ${entry.lastError || 'motivo não informado'}`
+                          : 'Aguardando conexão — envio automático'}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.attActionRow}>
+                    <TouchableOpacity style={styles.attViewBtn} onPress={() => handlePreviewQueued(entry)}>
+                      <FontAwesome5 name="eye" size={13} color="#ffffff" />
+                      <Text style={styles.attViewBtnText}>Visualizar</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.attDeleteBtn} onPress={() => handleRemoveQueued(entry)}>
+                      <FontAwesome5 name="trash-alt" size={13} color="#b91c1c" />
+                      <Text style={styles.attDeleteBtnText}>Remover</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })}
+          </>
+        )}
 
         <Text style={styles.menuSectionLabel}>ANEXOS DO ITEM ({item.attachments.length})</Text>
 

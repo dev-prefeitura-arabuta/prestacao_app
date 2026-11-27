@@ -245,6 +245,22 @@
             .smtp-card {
                 padding: 1.5rem 1.25rem;
             }
+            /* Abas roláveis na horizontal em vez de estourar a tela */
+            .tabs-nav {
+                overflow-x: auto;
+                flex-wrap: nowrap;
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: none;
+            }
+            .tab-btn {
+                white-space: nowrap;
+                flex-shrink: 0;
+                padding: 0.6rem 0.8rem;
+            }
+            /* Capa do PDF: prévia A4 abaixo do formulário */
+            .pdf-cover-grid {
+                grid-template-columns: 1fr !important;
+            }
         }
     </style>
 </head>
@@ -819,7 +835,7 @@
                                 <h2 class="section-title">Montagem e Personalização da Capa do PDF Unificado</h2>
                             </div>
 
-                            <div style="display: grid; grid-template-columns: 1.45fr 215px; gap: 1.25rem; align-items: start;">
+                            <div class="pdf-cover-grid" style="display: grid; grid-template-columns: 1.45fr 215px; gap: 1.25rem; align-items: start;">
                                 <div>
                                     <div class="form-group" style="margin-bottom: 0.65rem;">
                                         <label>Elementos da Capa e Estrutura do PDF</label>

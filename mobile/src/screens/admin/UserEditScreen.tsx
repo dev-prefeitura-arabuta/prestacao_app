@@ -133,7 +133,27 @@ export function UserEditScreen({
       />
 
       <Text style={[styles.label, { marginTop: 14 }]}>Perfil de acesso</Text>
-      <RoleToggle value={role} onChange={setRole} />
+      {user.is_primary_admin ? (
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+            padding: 12,
+            borderRadius: 9,
+            backgroundColor: '#f1f5f9',
+            borderWidth: 1,
+            borderColor: '#e2e8f0',
+          }}
+        >
+          <FontAwesome5 name="lock" size={13} color={COLORS.muted} />
+          <Text style={{ flex: 1, fontSize: 13, color: '#334155' }}>
+            <Text style={{ fontWeight: '800' }}>Administrador (principal)</Text> — sempre será administrador.
+          </Text>
+        </View>
+      ) : (
+        <RoleToggle value={role} onChange={setRole} />
+      )}
 
       <View style={styles.profileDivider} />
 

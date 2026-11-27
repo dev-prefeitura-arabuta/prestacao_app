@@ -14,11 +14,15 @@ Route::prefix('mobile')->group(function () {
     Route::post('logout', [MobileApiController::class, 'logout']);
     Route::get('avatar/{id}', [MobileApiController::class, 'avatar'])->whereNumber('id');
 
-    // Usuário autenticado
+    // Usuário autenticado (inclui a conta de desenvolvedor): somente o próprio perfil
     Route::middleware('auth.mobile')->group(function () {
         Route::get('me', [MobileApiController::class, 'me']);
         Route::post('profile', [MobileApiController::class, 'updateProfile']);
         Route::delete('profile/avatar', [MobileApiController::class, 'removeAvatar']);
+    });
+
+    // Área de negócio (a conta de desenvolvedor usa só o painel web)
+    Route::middleware(['auth.mobile', 'mobile.business'])->group(function () {
         Route::get('accountabilities', [MobileApiController::class, 'accountabilities']);
         Route::get('accountabilities/{id}', [MobileApiController::class, 'showAccountability'])->whereNumber('id');
         Route::post('accountabilities/{id}/upload/{itemNumber}', [MobileApiController::class, 'uploadAttachment'])
@@ -34,10 +38,17 @@ Route::prefix('mobile')->group(function () {
     });
 
     // Somente administradores
-    Route::middleware('auth.mobile:admin')->group(function () {
+    Route::middleware(['auth.mobile:admin', 'mobile.business'])->group(function () {
         Route::post('accountabilities', [MobileApiController::class, 'createAccountability']);
         Route::post('accountabilities/{id}/remind-whatsapp', [MobileApiController::class, 'remindWhatsapp'])
             ->whereNumber('id');
+        Route::post('accountabilities/{id}/items/{itemNumber}/status', [MobileApiController::class, 'updateItemStatus'])
+            ->whereNumber('id')
+            ->whereNumber('itemNumber');
+        Route::post('accountabilities/{id}/confirm-sent', [MobileApiController::class, 'confirmAllSent'])
+            ->whereNumber('id');
+        Route::get('review-queue', [MobileApiController::class, 'reviewQueue']);
+        Route::get('pending-by-user', [MobileApiController::class, 'pendingByUser']);
         Route::get('annual-history', [MobileApiController::class, 'annualHistory']);
         Route::get('audit-history', [MobileApiController::class, 'auditHistory']);
         Route::get('users', [MobileApiController::class, 'usersList']);

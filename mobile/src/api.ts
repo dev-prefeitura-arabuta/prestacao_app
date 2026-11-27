@@ -8,12 +8,55 @@ const WA_QUEUE_KEY = '@prestacao_wa_retry_queue';
 
 export const DEFAULT_API_URL = 'http://192.168.11.86:8000';
 
+/**
+ * Erro de chamada à API. `network = true` quando não houve resposta do servidor
+ * (sem internet, servidor fora do ar ou tempo esgotado) — nesses casos vale tentar de novo depois.
+ */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number = 0,
+    public readonly network: boolean = false
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+export const OFFLINE_MESSAGE = 'Sem conexão com o servidor. Verifique sua internet.';
+
+/** Verdadeiro quando a falha foi de conexão (não uma recusa do servidor). */
+export function isNetworkError(e: unknown): boolean {
+  if (e instanceof ApiError) return e.network;
+  // fetch do React Native lança TypeError("Network request failed") sem conexão
+  return e instanceof TypeError;
+}
+
+/** fetch que converte falha de conexão em ApiError(network). */
+async function request(url: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch {
+    throw new ApiError(OFFLINE_MESSAGE, 0, true);
+  }
+}
+
+async function readJson(res: Response, fallbackMsg: string): Promise<any> {
+  try {
+    return await res.json();
+  } catch {
+    throw new ApiError(`${fallbackMsg} (HTTP ${res.status})`, res.status);
+  }
+}
+
 export interface MobileUser {
   id: number;
   name: string;
   email: string;
   whatsapp: string;
   role: string;
+  /** Conta de desenvolvedor: no app só acessa o próprio perfil. */
+  is_developer?: boolean;
   avatar_url?: string | null;
 }
 
@@ -56,7 +99,39 @@ export interface AccountabilityDetail {
   all_items_filled?: boolean;
   can_submit?: boolean;
   admin_contacts?: Array<{ id: number; name: string; whatsapp: string }>;
+  /** Motivos prontos de rejeição (somente para o admin). */
+  rejection_presets?: string[];
   items: ChecklistItem[];
+}
+
+export interface ReviewQueueRow {
+  accountability_id: number;
+  accountability_title: string;
+  is_paused: boolean;
+  deadline: string | null;
+  item_number: number;
+  item_title: string;
+  attachments_count: number;
+  uploaders: string[];
+  sent_at: string | null;
+}
+
+export interface PendingPersonItem {
+  accountability_id: number;
+  accountability_title: string;
+  deadline: string | null;
+  overdue: boolean;
+  item_number: number;
+  item_title: string;
+  status: 'pendente' | 'rejeitado' | 'prazo_vencido';
+  has_files: boolean;
+}
+
+export interface PendingPersonRow {
+  user: { id: number; name: string; whatsapp: string; has_whatsapp: boolean };
+  overdue_count: number;
+  items: PendingPersonItem[];
+  reminder_text: string;
 }
 
 export async function getApiUrl(): Promise<string> {
@@ -194,12 +269,12 @@ export async function apiResetPassword(
 
 export async function apiGetAccountabilities(token: string): Promise<AccountabilitySummary[]> {
   const baseUrl = await getApiUrl();
-  const res = await fetch(`${baseUrl}/api/mobile/accountabilities`, {
+  const res = await request(`${baseUrl}/api/mobile/accountabilities`, {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
   });
-  const data = await res.json();
+  const data = await readJson(res, 'Erro ao carregar prestações de contas');
   if (!res.ok || !data.success) {
-    throw new Error(data.error || 'Erro ao carregar prestações de contas.');
+    throw new ApiError(data.error || 'Erro ao carregar prestações de contas.', res.status);
   }
   return data.data || [];
 }
@@ -233,12 +308,12 @@ export async function apiGetAccountabilityDetail(
   id: number
 ): Promise<AccountabilityDetail> {
   const baseUrl = await getApiUrl();
-  const res = await fetch(`${baseUrl}/api/mobile/accountabilities/${id}`, {
+  const res = await request(`${baseUrl}/api/mobile/accountabilities/${id}`, {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
   });
-  const data = await res.json();
+  const data = await readJson(res, 'Erro ao carregar detalhes da prestação');
   if (!res.ok || !data.success) {
-    throw new Error(data.error || 'Erro ao carregar detalhes da prestação.');
+    throw new ApiError(data.error || 'Erro ao carregar detalhes da prestação.', res.status);
   }
   return data.data;
 }
@@ -262,7 +337,7 @@ async function uploadMultipart(
   fallbackMsg: string
 ): Promise<any> {
   if (Platform.OS === 'web') {
-    const res = await fetch(url, {
+    const res = await request(url, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -272,7 +347,7 @@ async function uploadMultipart(
     });
     const data = await parseJsonSafe(res, fallbackMsg);
     if (!res.ok || !data?.success) {
-      throw new Error(data?.error || `${fallbackMsg} (HTTP ${res.status})`);
+      throw new ApiError(data?.error || `${fallbackMsg} (HTTP ${res.status})`, res.status);
     }
     return data;
   }
@@ -293,25 +368,26 @@ async function uploadMultipart(
         data = JSON.parse(raw);
       } catch {
         if (xhr.status === 413) {
-          reject(new Error('A imagem é muito grande para o servidor (HTTP 413). Tente uma foto menor.'));
+          reject(new ApiError('A imagem é muito grande para o servidor (HTTP 413). Tente uma foto menor.', 413));
           return;
         }
-        reject(new Error(`${fallbackMsg} (HTTP ${xhr.status})`));
+        // status 0 = a resposta não chegou (conexão caiu durante o envio)
+        reject(new ApiError(`${fallbackMsg} (HTTP ${xhr.status})`, xhr.status, xhr.status === 0));
         return;
       }
       if (xhr.status < 200 || xhr.status >= 300 || !data?.success) {
-        reject(new Error(data?.error || `${fallbackMsg} (HTTP ${xhr.status})`));
+        reject(new ApiError(data?.error || `${fallbackMsg} (HTTP ${xhr.status})`, xhr.status));
         return;
       }
       resolve(data);
     };
 
     xhr.onerror = () => {
-      reject(new Error('Falha de conexão ao enviar o arquivo. Verifique sua internet.'));
+      reject(new ApiError('Falha de conexão ao enviar o arquivo. Verifique sua internet.', 0, true));
     };
 
     xhr.ontimeout = () => {
-      reject(new Error('Tempo limite excedido ao enviar o arquivo.'));
+      reject(new ApiError('Tempo limite excedido ao enviar o arquivo.', 0, true));
     };
 
     xhr.send(formData);
@@ -322,12 +398,18 @@ export async function apiUploadAttachment(
   token: string,
   accountabilityId: number,
   itemNumber: number,
-  file: { uri: string; name: string; mimeType?: string }
-): Promise<void> {
+  file: { uri: string; name: string; mimeType?: string },
+  /** Identificador da fila offline: o servidor ignora reenvios com o mesmo valor. */
+  clientUploadId?: string
+): Promise<{ duplicate: boolean }> {
   const baseUrl = await getApiUrl();
   const formData = new FormData();
   const safeMime = file.mimeType || 'image/jpeg';
   const safeName = file.name && file.name.includes('.') ? file.name : `anexo_${Date.now()}.jpg`;
+
+  if (clientUploadId) {
+    formData.append('client_upload_id', clientUploadId);
+  }
 
   if (Platform.OS === 'web') {
     const blobRes = await fetch(file.uri);
@@ -341,12 +423,13 @@ export async function apiUploadAttachment(
     } as unknown as Blob);
   }
 
-  await uploadMultipart(
+  const data = await uploadMultipart(
     `${baseUrl}/api/mobile/accountabilities/${accountabilityId}/upload/${itemNumber}`,
     token,
     formData,
     'Erro ao enviar arquivo'
   );
+  return { duplicate: !!data?.duplicate };
 }
 
 export async function apiSubmitAccountability(
@@ -359,7 +442,7 @@ export async function apiSubmitAccountability(
   admin_wa_links: Array<{ id: number; name: string; phone: string; url: string }>;
 }> {
   const baseUrl = await getApiUrl();
-  const res = await fetch(`${baseUrl}/api/mobile/accountabilities/${accountabilityId}/submit`, {
+  const res = await request(`${baseUrl}/api/mobile/accountabilities/${accountabilityId}/submit`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -368,9 +451,9 @@ export async function apiSubmitAccountability(
     },
     body: JSON.stringify({ notify_admin: notifyAdmin }),
   });
-  const data = await res.json();
+  const data = await readJson(res, 'Não foi possível confirmar o envio');
   if (!res.ok || !data.success) {
-    throw new Error(data.error || 'Não foi possível confirmar o envio.');
+    throw new ApiError(data.error || 'Não foi possível confirmar o envio.', res.status);
   }
   return {
     message: data.message || 'Envio confirmado com sucesso!',
@@ -384,16 +467,16 @@ export async function apiDeleteAttachment(
   attachmentId: number
 ): Promise<string> {
   const baseUrl = await getApiUrl();
-  const res = await fetch(`${baseUrl}/api/mobile/attachments/${attachmentId}`, {
+  const res = await request(`${baseUrl}/api/mobile/attachments/${attachmentId}`, {
     method: 'DELETE',
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: 'application/json',
     },
   });
-  const data = await res.json();
+  const data = await readJson(res, 'Erro ao remover anexo');
   if (!res.ok || !data.success) {
-    throw new Error(data.error || 'Erro ao remover anexo.');
+    throw new ApiError(data.error || 'Erro ao remover anexo.', res.status);
   }
   return data.message || 'Anexo removido com sucesso!';
 }
@@ -630,6 +713,8 @@ export interface EditableUserDetail {
   email: string;
   whatsapp: string;
   role: 'admin' | 'user';
+  /** Administrador principal: sempre administrador (o servidor recusa a troca de perfil). */
+  is_primary_admin?: boolean;
   allowed_items: number[];
   all_items: Array<{ item_number: number; title: string }>;
 }
@@ -824,4 +909,61 @@ export async function apiMarkAllNotificationsRead(token: string): Promise<void> 
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
   }).catch(() => {});
+}
+
+// ---------- Avaliação pelo administrador ----------
+
+async function authedJson(token: string, path: string, init: RequestInit, fallbackMsg: string): Promise<any> {
+  const baseUrl = await getApiUrl();
+  const res = await request(`${baseUrl}${path}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+    },
+  });
+  const data = await readJson(res, fallbackMsg);
+  if (!res.ok || !data.success) {
+    throw new ApiError(data.error || fallbackMsg, res.status);
+  }
+  return data;
+}
+
+/** Confirma ou rejeita (com motivo) um item. Na rejeição, o servidor avisa quem enviou. */
+export async function apiSetItemStatus(
+  token: string,
+  accountabilityId: number,
+  itemNumber: number,
+  status: 'confirmado' | 'rejeitado',
+  rejectionReason = ''
+): Promise<{ message: string; status: string; notified: number }> {
+  const data = await authedJson(
+    token,
+    `/api/mobile/accountabilities/${accountabilityId}/items/${itemNumber}/status`,
+    { method: 'POST', body: JSON.stringify({ status, rejection_reason: rejectionReason }) },
+    'Não foi possível atualizar a situação do item.'
+  );
+  return { message: data.message, status: data.status, notified: Number(data.notified || 0) };
+}
+
+/** Confirma de uma vez todos os itens enviados da prestação. */
+export async function apiConfirmAllSent(token: string, accountabilityId: number): Promise<{ confirmed: number; message: string }> {
+  const data = await authedJson(
+    token,
+    `/api/mobile/accountabilities/${accountabilityId}/confirm-sent`,
+    { method: 'POST', body: JSON.stringify({}) },
+    'Não foi possível confirmar os itens.'
+  );
+  return { confirmed: Number(data.confirmed || 0), message: data.message };
+}
+
+export async function apiGetReviewQueue(token: string): Promise<ReviewQueueRow[]> {
+  const data = await authedJson(token, '/api/mobile/review-queue', { method: 'GET' }, 'Erro ao carregar itens para avaliar.');
+  return data.data || [];
+}
+
+export async function apiGetPendingByUser(token: string): Promise<PendingPersonRow[]> {
+  const data = await authedJson(token, '/api/mobile/pending-by-user', { method: 'GET' }, 'Erro ao carregar pendências.');
+  return data.data || [];
 }

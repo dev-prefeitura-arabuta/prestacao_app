@@ -5,8 +5,10 @@ use App\Http\Controllers\AnnualHistoryController;
 use App\Http\Controllers\AuditHistoryController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\HomeController;
+use App\Http\Controllers\LogsController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\ReviewController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\UsersController;
 use Illuminate\Support\Facades\Route;
@@ -30,40 +32,58 @@ Route::post('reset-password', [AuthController::class, 'resetPassword'])->middlew
 
 // Rotas Protegidas por Sessão
 Route::middleware(['auth.session'])->group(function () {
-    Route::get('accountability', [AccountabilityController::class, 'index']);
-    Route::get('accountability/create', [AccountabilityController::class, 'create']);
-    Route::post('accountability', [AccountabilityController::class, 'store']);
-    Route::get('accountability/{id}/edit', [AccountabilityController::class, 'edit'])->whereNumber('id');
-    Route::post('accountability/{id}/update', [AccountabilityController::class, 'update'])->whereNumber('id');
-    Route::post('accountability/{id}/toggle-pause', [AccountabilityController::class, 'togglePause'])->whereNumber('id');
-    Route::get('accountability/{id}', [AccountabilityController::class, 'show'])->whereNumber('id');
-    Route::get('accountability/{id}/print-pdf', [AccountabilityController::class, 'printPdf'])->whereNumber('id');
-    Route::get('accountability/{id}/report', [AccountabilityController::class, 'report'])->whereNumber('id');
-    Route::post('accountability/{id}/assistant', [AccountabilityController::class, 'localAssistant'])->whereNumber('id');
-    Route::post('accountability/{id}/analyze-all', [AccountabilityController::class, 'analyzeAll'])->whereNumber('id');
-    Route::post('accountability/{id}/submit', [AccountabilityController::class, 'submitAccountability'])->whereNumber('id');
-    Route::post('accountability/{id}/send-email', [AccountabilityController::class, 'sendEmail'])->whereNumber('id');
-    Route::post('accountability/{id}/delete', [AccountabilityController::class, 'delete'])->whereNumber('id');
-    Route::post('accountability/{id}/upload/{itemNumber}', [AccountabilityController::class, 'upload'])->whereNumber('id')->whereNumber('itemNumber');
-    Route::post('accountability/{id}/item/{itemNumber}/submit', [AccountabilityController::class, 'submitItem'])->whereNumber('id')->whereNumber('itemNumber');
-    Route::post('accountability/{id}/item/{itemNumber}/status', [AccountabilityController::class, 'updateItemStatus'])->whereNumber('id')->whereNumber('itemNumber');
-    Route::get('accountability/attachment/{attachmentId}/preview', [AccountabilityController::class, 'previewAttachment'])->whereNumber('attachmentId');
-    Route::get('accountability/attachment/{attachmentId}/download', [AccountabilityController::class, 'downloadAttachment'])->whereNumber('attachmentId');
-    Route::post('accountability/attachment/{attachmentId}/delete', [AccountabilityController::class, 'deleteAttachment'])->whereNumber('attachmentId');
-    Route::post('accountability/attachment/{attachmentId}/analyze', [AccountabilityController::class, 'analyzeAttachment'])->whereNumber('attachmentId');
+    // Área de negócio (prestações, avaliação, históricos). A conta de desenvolvedor não usa
+    // e é levada aos Logs do Sistema.
+    Route::middleware('business')->group(function () {
+        Route::get('accountability', [AccountabilityController::class, 'index']);
+        Route::get('accountability/create', [AccountabilityController::class, 'create']);
+        Route::post('accountability', [AccountabilityController::class, 'store']);
+        Route::get('accountability/{id}/edit', [AccountabilityController::class, 'edit'])->whereNumber('id');
+        Route::post('accountability/{id}/update', [AccountabilityController::class, 'update'])->whereNumber('id');
+        Route::post('accountability/{id}/toggle-pause', [AccountabilityController::class, 'togglePause'])->whereNumber('id');
+        Route::get('accountability/{id}', [AccountabilityController::class, 'show'])->whereNumber('id');
+        Route::get('accountability/{id}/print-pdf', [AccountabilityController::class, 'printPdf'])->whereNumber('id');
+        Route::get('accountability/{id}/report', [AccountabilityController::class, 'report'])->whereNumber('id');
+        Route::post('accountability/{id}/assistant', [AccountabilityController::class, 'localAssistant'])->whereNumber('id');
+        Route::post('accountability/{id}/analyze-all', [AccountabilityController::class, 'analyzeAll'])->whereNumber('id');
+        Route::post('accountability/{id}/submit', [AccountabilityController::class, 'submitAccountability'])->whereNumber('id');
+        Route::post('accountability/{id}/send-email', [AccountabilityController::class, 'sendEmail'])->whereNumber('id');
+        Route::post('accountability/{id}/delete', [AccountabilityController::class, 'delete'])->whereNumber('id');
+        Route::post('accountability/{id}/upload/{itemNumber}', [AccountabilityController::class, 'upload'])->whereNumber('id')->whereNumber('itemNumber');
+        Route::post('accountability/{id}/item/{itemNumber}/submit', [AccountabilityController::class, 'submitItem'])->whereNumber('id')->whereNumber('itemNumber');
+        Route::post('accountability/{id}/item/{itemNumber}/status', [AccountabilityController::class, 'updateItemStatus'])->whereNumber('id')->whereNumber('itemNumber');
+        Route::get('accountability/attachment/{attachmentId}/preview', [AccountabilityController::class, 'previewAttachment'])->whereNumber('attachmentId');
+        Route::get('accountability/attachment/{attachmentId}/download', [AccountabilityController::class, 'downloadAttachment'])->whereNumber('attachmentId');
+        Route::post('accountability/attachment/{attachmentId}/delete', [AccountabilityController::class, 'deleteAttachment'])->whereNumber('attachmentId');
+        Route::post('accountability/attachment/{attachmentId}/analyze', [AccountabilityController::class, 'analyzeAttachment'])->whereNumber('attachmentId');
+
+        // Notificações do Administrador (Desktop)
+        Route::get('notifications', [NotificationController::class, 'index']);
+        Route::post('notifications/toggle', [NotificationController::class, 'toggle']);
+        Route::post('notifications/read-all', [NotificationController::class, 'markAllRead']);
+        Route::post('notifications/{id}/read', [NotificationController::class, 'markRead'])->whereNumber('id');
+
+        Route::middleware('admin')->group(function () {
+            // Histórico Anual (índice de anos + subpáginas automáticas por ano)
+            Route::get('historico-anual', [AnnualHistoryController::class, 'index']);
+            Route::get('historico-anual/{year}', [AnnualHistoryController::class, 'showYear'])->whereNumber('year');
+
+            // Histórico de Auditoria
+            Route::get('history', [AuditHistoryController::class, 'index']);
+
+            // Apoio à avaliação
+            Route::get('review', [ReviewController::class, 'queue']);
+            Route::get('pendencias', [ReviewController::class, 'pendingByUser']);
+            Route::post('accountability/{id}/confirm-sent', [AccountabilityController::class, 'confirmAllSent'])->whereNumber('id');
+            Route::post('accountability/{id}/duplicate', [AccountabilityController::class, 'duplicate'])->whereNumber('id');
+        });
+    });
 
     // Capa do PDF (usada na impressão por qualquer usuário autenticado)
     Route::get('settings/pdf-cover/art', [SettingsController::class, 'pdfCoverArt']);
 
-    // Somente administradores
+    // Somente administradores (inclui a conta de desenvolvedor)
     Route::middleware('admin')->group(function () {
-        // Histórico Anual (índice de anos + subpáginas automáticas por ano)
-        Route::get('historico-anual', [AnnualHistoryController::class, 'index']);
-        Route::get('historico-anual/{year}', [AnnualHistoryController::class, 'showYear'])->whereNumber('year');
-
-        // Histórico de Auditoria
-        Route::get('history', [AuditHistoryController::class, 'index']);
-
         // Usuários e Permissões
         Route::get('users', [UsersController::class, 'index']);
         Route::get('users/create', [UsersController::class, 'create']);
@@ -80,7 +100,7 @@ Route::middleware(['auth.session'])->group(function () {
         Route::post('settings/pdf-cover', [SettingsController::class, 'savePdfCover']);
         Route::post('settings/pdf-cover/remove-art', [SettingsController::class, 'removePdfCoverArt']);
 
-        // Configurações técnicas (somente conta de desenvolvedor)
+        // Somente conta de desenvolvedor: configurações técnicas e logs
         Route::middleware('developer')->group(function () {
             Route::post('settings/smtp', [SettingsController::class, 'saveSmtp']);
             Route::post('settings/smtp/toggle', [SettingsController::class, 'toggleSmtpStatus']);
@@ -91,6 +111,10 @@ Route::middleware(['auth.session'])->group(function () {
             Route::post('settings/whatsapp/test', [SettingsController::class, 'testWhatsapp']);
             Route::post('settings/whatsapp/notify-overdue', [SettingsController::class, 'notifyOverdueWhatsapp']);
             Route::post('settings/ollama', [SettingsController::class, 'saveOllama']);
+
+            // Logs do Sistema
+            Route::get('logs', [LogsController::class, 'index']);
+            Route::get('logs/download/{file}', [LogsController::class, 'download'])->where('file', '[A-Za-z0-9._-]+');
         });
     });
 
@@ -99,10 +123,4 @@ Route::middleware(['auth.session'])->group(function () {
     Route::post('profile/update', [ProfileController::class, 'update']);
     Route::post('profile/avatar/remove', [ProfileController::class, 'removeAvatar']);
     Route::get('profile/avatar/{id}', [ProfileController::class, 'avatar'])->whereNumber('id');
-
-    // Notificações do Administrador (Desktop)
-    Route::get('notifications', [NotificationController::class, 'index']);
-    Route::post('notifications/toggle', [NotificationController::class, 'toggle']);
-    Route::post('notifications/read-all', [NotificationController::class, 'markAllRead']);
-    Route::post('notifications/{id}/read', [NotificationController::class, 'markRead'])->whereNumber('id');
 });

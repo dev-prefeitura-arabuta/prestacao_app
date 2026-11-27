@@ -14,6 +14,7 @@ class AccountabilityAttachment extends Model
         'accountability_id',
         'item_number',
         'user_id',
+        'client_upload_id',
         'original_name',
         'file_name',
         'file_path',

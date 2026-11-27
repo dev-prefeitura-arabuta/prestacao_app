@@ -20,13 +20,43 @@ class User extends Model
         'notifications_enabled',
     ];
 
+    // 'is_primary_admin' também fica fora de $fillable: só a migração o define.
     protected $casts = [
-        'is_developer' => 'boolean',
+        'is_developer'     => 'boolean',
+        'is_primary_admin' => 'boolean',
     ];
 
     public function isDeveloper(): bool
     {
         return (bool) ($this->is_developer ?? false);
+    }
+
+    /**
+     * Id do administrador principal: o marcado no banco. Numa instalação nova (ninguém marcado),
+     * marca o administrador mais antigo que não seja desenvolvedor, para ele ficar fixo dali em diante
+     * (promover depois um usuário mais antigo não muda quem é o principal).
+     */
+    public static function primaryAdminId(): ?int
+    {
+        $flagged = static::where('is_primary_admin', true)->orderBy('id')->value('id');
+        if ($flagged !== null) {
+            return (int) $flagged;
+        }
+
+        $oldest = static::where('role', 'admin')->where('is_developer', false)->orderBy('id')->value('id');
+        if ($oldest === null) {
+            return null;
+        }
+
+        static::whereKey($oldest)->update(['is_primary_admin' => true]);
+
+        return (int) $oldest;
+    }
+
+    /** O administrador principal nunca deixa de ser administrador nem pode ser excluído. */
+    public function isPrimaryAdmin(): bool
+    {
+        return $this->id !== null && (int) $this->id === static::primaryAdminId();
     }
 
     /** Administradores do negócio (exclui contas de desenvolvedor). */

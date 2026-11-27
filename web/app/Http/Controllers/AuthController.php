@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use App\Services\PasswordResetService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Throwable;
 
@@ -44,6 +45,8 @@ class AuthController extends Controller
         $user = User::where('email', $login)->first();
 
         if ($user === null || ! password_verify($password, (string) $user->password_hashed)) {
+            Log::warning('Falha de login (web)', ['email' => $login, 'ip' => $request->ip()]);
+
             return back()->withInput($request->only('login'))->with('error', 'Credenciais inválidas.');
         }
 
@@ -60,7 +63,9 @@ class AuthController extends Controller
             'isLoggedIn'  => true,
         ]);
 
-        return redirect('/accountability');
+        Log::info('Login (web)', ['user_id' => (int) $user->id, 'email' => (string) $user->email, 'ip' => $request->ip()]);
+
+        return redirect($user->isDeveloper() ? '/logs' : '/accountability');
     }
 
     public function logout(Request $request)

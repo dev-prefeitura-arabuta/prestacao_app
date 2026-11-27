@@ -17,6 +17,8 @@ $app = Application::configure(basePath: dirname(__DIR__))
             'auth.mobile'  => \App\Http\Middleware\MobileTokenAuth::class,
             'admin'        => \App\Http\Middleware\EnsureAdmin::class,
             'developer'    => \App\Http\Middleware\EnsureDeveloper::class,
+            'business'     => \App\Http\Middleware\EnsureNotDeveloper::class,
+            'mobile.business' => \App\Http\Middleware\MobileBusinessAccess::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

@@ -104,7 +104,9 @@ export function WhatsappReminderModal({
       Alert.alert('Sem WhatsApp', `${target.name} não possui número de WhatsApp cadastrado. Cadastre em Usuários e Permissões.`);
       return;
     }
-    if (digits.length <= 11 && !digits.startsWith('55')) {
+    // 10/11 dígitos = número nacional (DDD + número): sempre recebe o DDI.
+    // Não usar startsWith('55'): o DDD 55 (RS) seria confundido com o DDI.
+    if (digits.length <= 11) {
       digits = '55' + digits;
     }
 

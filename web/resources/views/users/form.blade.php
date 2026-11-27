@@ -369,10 +369,21 @@
 
                             <div class="form-group">
                                 <label for="role">Permissão (Perfil)</label>
-                                <select id="role" name="role" class="form-control" required>
-                                    <option value="user" <?= $currentRole === 'user' ? 'selected' : '' ?>>Usuário Padrão</option>
-                                    <option value="admin" <?= $currentRole === 'admin' ? 'selected' : '' ?>>Administrador</option>
-                                </select>
+                                <?php if (! empty($isPrimaryAdmin)): ?>
+                                    <?php /* Administrador principal: perfil travado (o servidor também recusa a troca) */ ?>
+                                    <input type="hidden" name="role" value="admin">
+                                    <div class="form-control" style="background:#f1f5f9; color:#334155; display:flex; align-items:center; gap:0.5rem; cursor:not-allowed;" title="O administrador principal sempre será administrador">
+                                        <i class="fa-solid fa-lock" style="color:#64748b;"></i> Administrador (principal)
+                                    </div>
+                                    <small style="display:block; margin-top:0.35rem; color:#64748b; font-size:0.78rem;">
+                                        Esta é a conta do administrador principal: ela sempre será administradora e não pode ser excluída.
+                                    </small>
+                                <?php else: ?>
+                                    <select id="role" name="role" class="form-control" required>
+                                        <option value="user" <?= $currentRole === 'user' ? 'selected' : '' ?>>Usuário Padrão</option>
+                                        <option value="admin" <?= $currentRole === 'admin' ? 'selected' : '' ?>>Administrador</option>
+                                    </select>
+                                <?php endif; ?>
                             </div>
 
                             <div class="form-group">

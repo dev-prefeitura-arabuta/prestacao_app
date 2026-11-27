@@ -235,15 +235,78 @@ $title   = $pageTitle ?? ($uRole === 'admin' ? 'Painel Administrativo' : 'Presta
         font-size: 0.82rem;
         color: #94a3b8;
     }
+    .top-menu-btn {
+        display: none;
+    }
+
+    /* Celular: botão ☰, título cortado, só a foto do usuário e "Sair" só com ícone */
+    @media (max-width: 768px) {
+        .top-navbar {
+            position: sticky;
+            top: 0;
+            z-index: 60;
+            padding: 0.55rem 0.85rem;
+            gap: 0.6rem;
+        }
+        .top-menu-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            flex-shrink: 0;
+            border-radius: 9px;
+            border: 1px solid #e2e8f0;
+            background: #ffffff;
+            color: #0f172a;
+            font-size: 1.05rem;
+            cursor: pointer;
+        }
+        .top-navbar-brand {
+            flex: 1;
+            min-width: 0;
+            font-size: 1rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .top-navbar-right {
+            gap: 0.5rem;
+            flex-shrink: 0;
+        }
+        .top-user-text {
+            display: none;
+        }
+        .top-btn-logout {
+            padding: 0.55rem 0.65rem;
+        }
+        .top-btn-logout span {
+            display: none;
+        }
+        .notif-wrap {
+            position: static;
+        }
+        .notif-dropdown {
+            position: fixed;
+            top: 62px;
+            left: 0.75rem;
+            right: 0.75rem;
+            width: auto;
+            max-width: none;
+        }
+    }
 </style>
 
 <nav class="top-navbar">
-    <a href="<?= site_url('accountability') ?>" class="top-navbar-brand">
+    <button type="button" class="top-menu-btn" data-mobile-menu-toggle aria-label="Abrir menu" aria-controls="adminSidebar" aria-expanded="false">
+        <i class="fa-solid fa-bars"></i>
+    </button>
+    <a href="<?= site_url(session('is_developer') ? 'logs' : 'accountability') ?>" class="top-navbar-brand">
         <?= esc($title) ?>
     </a>
 
     <div class="top-navbar-right">
-        <?php if ($uRole === 'admin'): ?>
+        <?php if ($uRole === 'admin' && ! session('is_developer')): ?>
             <div class="notif-wrap" id="adminNotifWrap">
                 <button type="button" class="notif-bell-btn" id="adminNotifBellBtn" title="Notificações de atividades concluídas">
                     <i class="fa-solid fa-bell" id="adminNotifBellIcon"></i>
@@ -296,7 +359,7 @@ $title   = $pageTitle ?? ($uRole === 'admin' ? 'Painel Administrativo' : 'Presta
         </form>
     </div>
 </nav>
-<?php if ($uRole === 'admin'): ?>
+<?php if ($uRole === 'admin' && ! session('is_developer')): ?>
 <script>
 (function () {
     const csrfToken = '<?= csrf_token() ?>';

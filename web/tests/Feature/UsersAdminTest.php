@@ -120,6 +120,76 @@ class UsersAdminTest extends TestCase
         $this->assertSame([], UserAccountabilityPermission::getAllowedItemsForUser((int) $user->id));
     }
 
+    // ---------- Administrador principal ----------
+
+    public function test_administrador_principal_nunca_vira_usuario_comum(): void
+    {
+        $primary = $this->makeUser('admin', [], ['name' => 'Admin Principal']);
+        $other   = $this->makeUser('admin');
+        $this->loginAs($other);
+
+        $this->get('/users/' . $primary->id . '/edit')
+            ->assertOk()
+            ->assertSee('Administrador (principal)')
+            ->assertDontSee('<select id="role"', false);
+
+        $this->post('/users/' . $primary->id . '/update', [
+            'name' => 'Admin Principal', 'email' => $primary->email, 'role' => 'user',
+        ])->assertSessionHas('error');
+        $this->post('/users/' . $primary->id . '/role', ['role' => 'user'])->assertSessionHas('error');
+        $this->assertSame('admin', $primary->fresh()->role);
+
+        // Os demais dados continuam editáveis
+        $this->post('/users/' . $primary->id . '/update', [
+            'name' => 'Admin Renomeado', 'email' => $primary->email, 'role' => 'admin',
+        ])->assertSessionHas('success');
+        $this->assertSame('Admin Renomeado', $primary->fresh()->name);
+    }
+
+    public function test_administrador_principal_nao_pode_ser_excluido(): void
+    {
+        $primary = $this->makeUser('admin');
+        $this->loginAs($this->makeUser('admin'));
+
+        $this->get('/users')->assertOk()->assertSee('Principal');
+        $this->post('/users/' . $primary->id . '/delete')->assertSessionHas('error');
+        $this->assertNotNull(User::find($primary->id));
+    }
+
+    public function test_principal_fica_fixo_mesmo_promovendo_usuario_mais_antigo(): void
+    {
+        $older   = $this->makeUser('user');
+        $primary = $this->makeUser('admin');
+        $this->loginAs($primary);
+
+        $this->get('/users')->assertOk(); // define e grava o principal
+        $this->post('/users/' . $older->id . '/role', ['role' => 'admin'])->assertRedirect('/users');
+
+        $this->assertSame((int) $primary->id, User::primaryAdminId());
+        $this->post('/users/' . $older->id . '/role', ['role' => 'user'])->assertSessionHas('success');
+        $this->assertSame('user', $older->fresh()->role);
+    }
+
+    public function test_app_nao_troca_perfil_do_administrador_principal(): void
+    {
+        $primary = $this->makeUser('admin');
+        $headers = $this->mobileHeaders($this->makeUser('admin'));
+
+        $this->getJson('/api/mobile/users/' . $primary->id, $headers)->assertJsonPath('data.is_primary_admin', true);
+        $this->postJson('/api/mobile/users/' . $primary->id, [
+            'name' => $primary->name, 'email' => $primary->email, 'role' => 'user',
+        ], $headers)->assertStatus(422);
+        $this->assertSame('admin', $primary->fresh()->role);
+    }
+
+    public function test_principal_nao_vira_conta_de_desenvolvedor(): void
+    {
+        $primary = $this->makeUser('admin');
+
+        $this->artisan('app:developer', ['email' => $primary->email])->assertFailed();
+        $this->assertFalse($primary->fresh()->isDeveloper());
+    }
+
     public function test_admin_nao_exclui_a_propria_conta(): void
     {
         $admin = $this->makeUser('admin');

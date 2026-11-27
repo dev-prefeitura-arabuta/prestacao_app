@@ -166,6 +166,42 @@ class DeveloperAccessTest extends TestCase
         $this->assertSame('admin', $dev->fresh()->role);
     }
 
+    public function test_app_mobile_libera_ao_desenvolvedor_so_o_perfil(): void
+    {
+        $dev     = $this->makeDeveloper();
+        $acc     = $this->makeAccountability([1]);
+        $headers = $this->mobileHeaders($dev);
+
+        $this->postJson('/api/mobile/login', ['email' => $dev->email, 'password' => 'segredo123'])
+            ->assertOk()
+            ->assertJsonPath('user.is_developer', true);
+        $this->getJson('/api/mobile/me', $headers)->assertOk()->assertJsonPath('user.is_developer', true);
+        $this->postJson('/api/mobile/profile', ['name' => 'Dev Renomeado', 'email' => $dev->email], $headers)->assertOk();
+
+        $blocked = [
+            ['GET', '/api/mobile/accountabilities'],
+            ['GET', '/api/mobile/accountabilities/' . $acc->id],
+            ['POST', '/api/mobile/accountabilities/' . $acc->id . '/submit'],
+            ['POST', '/api/mobile/accountabilities'],
+            ['GET', '/api/mobile/review-queue'],
+            ['GET', '/api/mobile/pending-by-user'],
+            ['GET', '/api/mobile/users'],
+            ['GET', '/api/mobile/notifications'],
+            ['GET', '/api/mobile/settings-summary'],
+        ];
+        foreach ($blocked as [$method, $url]) {
+            $this->json($method, $url, ['title' => 'Via dev'], $headers)
+                ->assertForbidden()
+                ->assertJsonPath('developer', true);
+        }
+        $this->assertSame(1, \App\Models\Accountability::count());
+
+        // Admin comum segue normal e recebe is_developer = false
+        $adminHeaders = $this->mobileHeaders($this->makeUser('admin'));
+        $this->getJson('/api/mobile/me', $adminHeaders)->assertJsonPath('user.is_developer', false);
+        $this->getJson('/api/mobile/accountabilities', $adminHeaders)->assertOk();
+    }
+
     // ---------- Desenvolvedor fora do fluxo do negócio ----------
 
     public function test_desenvolvedor_nao_recebe_notificacoes_nem_aparece_como_contato(): void
@@ -182,6 +218,154 @@ class DeveloperAccessTest extends TestCase
             ->assertOk()
             ->assertJsonCount(1, 'data.admin_contacts')
             ->assertJsonPath('data.admin_contacts.0.id', (int) $admin->id);
+    }
+
+    // ---------- Área do desenvolvedor: sem menu de negócio, com Logs ----------
+
+    public function test_login_do_desenvolvedor_vai_para_os_logs(): void
+    {
+        $dev = $this->makeDeveloper();
+
+        $this->post('/login', ['login' => $dev->email, 'password' => 'segredo123'])->assertRedirect('/logs');
+    }
+
+    public function test_desenvolvedor_nao_acessa_area_de_negocio(): void
+    {
+        $acc = $this->makeAccountability([1]);
+        $this->loginAs($this->makeDeveloper());
+
+        foreach (['/accountability', '/accountability/' . $acc->id, '/review', '/pendencias', '/history', '/historico-anual', '/notifications'] as $url) {
+            $this->get($url)->assertRedirect('/logs');
+        }
+        $this->postJson('/accountability/' . $acc->id . '/delete')->assertForbidden();
+        $this->assertNotNull(\App\Models\Accountability::find($acc->id));
+
+        // Continua com usuários, configurações e perfil
+        $this->get('/users')->assertOk();
+        $this->get('/settings')->assertOk();
+        $this->get('/profile')->assertOk();
+    }
+
+    public function test_menu_do_desenvolvedor_mostra_logs_e_esconde_o_negocio(): void
+    {
+        $this->useTempStorage();
+        $this->loginAs($this->makeDeveloper());
+
+        $this->get('/logs')
+            ->assertOk()
+            ->assertSee('Logs do Sistema')
+            ->assertSee('Desenvolvedor')
+            ->assertDontSee('Para Avaliar')
+            ->assertDontSee('Pendências por Pessoa')
+            ->assertDontSee('adminNotifBellBtn', false);
+    }
+
+    public function test_admin_e_usuario_nao_acessam_logs(): void
+    {
+        $this->loginAs($this->makeUser('admin'));
+        $this->get('/logs')->assertRedirect('/settings?tab=general');
+        $this->get('/logs/download/laravel.log')->assertRedirect('/settings?tab=general');
+
+        $this->loginAs($this->makeUser('user'));
+        $this->get('/logs')->assertRedirect('/accountability');
+    }
+
+    private function writeLog(string $name, string $content): void
+    {
+        $dir = storage_path('logs');
+        if (! is_dir($dir)) {
+            mkdir($dir, 0775, true);
+        }
+        file_put_contents($dir . DIRECTORY_SEPARATOR . $name, $content);
+    }
+
+    public function test_tela_de_logs_lista_dias_niveis_e_filtra(): void
+    {
+        $this->useTempStorage();
+        $this->writeLog('laravel-2026-11-27.log', "[2026-11-27 09:00:00] local.INFO: Login (web) {\"user_id\":1}\n");
+        $this->writeLog('laravel-2026-11-28.log', implode("\n", [
+            '[2026-11-28 08:00:00] local.INFO: Login (web) {"user_id":3,"email":"a@b.com"}',
+            '[2026-11-28 08:05:00] local.WARNING: Falha de login (web) {"email":"x@y.com"}',
+            '[2026-11-28 08:10:00] local.ERROR: SQLSTATE[HY000] conexão recusada {"exception":"[object] (PDOException(code: 2002))',
+            '[stacktrace]',
+            '#0 /app/vendor/laravel/framework/src/Database/Connection.php(100): connect()',
+            '"}',
+            '',
+        ]));
+        $this->writeLog('outro-arquivo.txt', 'não deve aparecer');
+        $this->loginAs($this->makeDeveloper());
+
+        $res = $this->get('/logs')->assertOk();
+        $res->assertViewHas('file', 'laravel-2026-11-28.log')
+            ->assertSee('28/11/2026')
+            ->assertSee('27/11/2026')
+            ->assertDontSee('outro-arquivo')
+            ->assertSee('SQLSTATE[HY000] conexão recusada')
+            ->assertSee('Connection.php(100)')
+            ->assertSee('Erros (1)')
+            ->assertSee('Avisos (1)')
+            ->assertSee('Informações (1)');
+
+        $this->get('/logs?file=laravel-2026-11-28.log&level=error')
+            ->assertSee('SQLSTATE')
+            ->assertDontSee('Falha de login (web)');
+
+        $this->get('/logs?file=laravel-2026-11-28.log&q=x@y.com')
+            ->assertSee('Falha de login (web)')
+            ->assertDontSee('SQLSTATE[HY000] conexão');
+
+        $this->get('/logs?file=laravel-2026-11-27.log')->assertViewHas('file', 'laravel-2026-11-27.log');
+    }
+
+    public function test_preview_detalhado_vem_na_pagina_sem_permitir_html_do_log(): void
+    {
+        $this->useTempStorage();
+        $this->writeLog('laravel-2026-11-28.log', implode("\n", [
+            '[2026-11-28 08:00:00] local.INFO: Login (web) {"user_id":3,"ip":"10.0.0.1"}',
+            '[2026-11-28 08:01:00] local.WARNING: </script><script>alert(1)</script><img src=x onerror=alert(2)>',
+            '',
+        ]));
+        $this->loginAs($this->makeDeveloper());
+
+        $html = $this->get('/logs')->assertOk()->getContent();
+
+        $this->assertStringContainsString('id="lvDrawer"', $html);
+        $this->assertStringContainsString('id="lvData"', $html);
+        $this->assertStringContainsString('user_id: 3', $html, 'Campos do contexto aparecem na lista');
+        // O conteúdo do log nunca entra como HTML/JS executável
+        $this->assertStringNotContainsString('<script>alert(1)</script>', $html);
+        $this->assertStringNotContainsString('<img src=x', $html);
+        $this->assertStringContainsString('u003Cscript', $html, 'Dados do preview escapados no JSON');
+
+        preg_match('#<script type="application/json" id="lvData">(.*?)</script>#s', $html, $m);
+        $data = json_decode($m[1], true);
+        $this->assertSame('</script><script>alert(1)</script><img src=x onerror=alert(2)>', $data[0]['clean_message']);
+        $this->assertSame(['user_id' => 3, 'ip' => '10.0.0.1'], $data[1]['context']);
+    }
+
+    public function test_logs_nao_permitem_ler_outros_arquivos(): void
+    {
+        $this->useTempStorage();
+        $this->writeLog('laravel.log', "[2026-11-28 08:00:00] local.INFO: ok\n");
+        file_put_contents(storage_path('segredo.txt'), 'APP_KEY=base64:segredo');
+        $this->loginAs($this->makeDeveloper());
+
+        $this->get('/logs?file=../segredo.txt')->assertOk()->assertViewHas('file', 'laravel.log')->assertDontSee('APP_KEY');
+        $this->get('/logs/download/segredo.txt')->assertNotFound();
+        $this->get('/logs/download/..%2Fsegredo.txt')->assertNotFound();
+        $this->get('/logs/download/laravel.log')->assertOk()->assertDownload('laravel.log');
+    }
+
+    public function test_tentativas_de_login_ficam_no_log(): void
+    {
+        \Illuminate\Support\Facades\Log::spy();
+        $user = $this->makeUser();
+
+        $this->post('/login', ['login' => $user->email, 'password' => 'errada']);
+        $this->post('/login', ['login' => $user->email, 'password' => 'segredo123']);
+
+        \Illuminate\Support\Facades\Log::shouldHaveReceived('warning')->with('Falha de login (web)', \Mockery::type('array'))->once();
+        \Illuminate\Support\Facades\Log::shouldHaveReceived('info')->with('Login (web)', \Mockery::type('array'))->once();
     }
 
     // ---------- Comando app:developer ----------

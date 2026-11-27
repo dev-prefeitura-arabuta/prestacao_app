@@ -35,6 +35,12 @@ class MakeDeveloperCommand extends Command
             return self::SUCCESS;
         }
 
+        if ($user->isPrimaryAdmin()) {
+            $this->error('O administrador principal não pode ser conta de desenvolvedor (ele perderia o acesso às prestações). Use outra conta.');
+
+            return self::FAILURE;
+        }
+
         // Desenvolvedor sempre é administrador
         $user->forceFill(['is_developer' => true, 'role' => 'admin'])->save();
         $this->info("{$user->name} agora é desenvolvedor (acesso a SMTP, WhatsApp e IA). Faça login novamente para aplicar.");

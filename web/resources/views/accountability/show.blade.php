@@ -1541,6 +1541,23 @@
                             <button type="button" id="openSendEmailModalBtn" class="btn-submit-item-row" style="padding: 0.6rem 1.15rem; font-size: 0.88rem; background-color: #2563eb; border-color: #2563eb; gap: 0.45rem; display: inline-flex; align-items: center;">
                                 <i class="fa-solid fa-envelope"></i> Enviar por E-mail
                             </button>
+                            <?php $sentToReview = count(array_filter($itemStatuses ?? [], fn ($st) => $st === 'enviado')); ?>
+                            <?php if ($sentToReview > 0): ?>
+                                <form action="<?= site_url('accountability/' . $accId . '/confirm-sent') ?>" method="post"
+                                      onsubmit="return confirm('Confirmar de uma vez os <?= (int) $sentToReview ?> item(ns) enviado(s)? Revise os documentos antes.');">
+                                    <?= csrf_field() ?>
+                                    <button type="submit" class="btn-submit-item-row" style="padding: 0.6rem 1.15rem; font-size: 0.88rem; background-color: #16a34a; border-color: #16a34a;">
+                                        ✓ Confirmar <?= (int) $sentToReview ?> enviado(s)
+                                    </button>
+                                </form>
+                            <?php endif; ?>
+                            <form action="<?= site_url('accountability/' . $accId . '/duplicate') ?>" method="post"
+                                  onsubmit="return confirm('Criar uma cópia desta prestação com os mesmos itens? A cópia fica pausada até você ajustar título e prazo.');">
+                                <?= csrf_field() ?>
+                                <button type="submit" class="btn-back" title="Criar nova prestação com os mesmos itens" style="gap: 0.45rem;">
+                                    <i class="fa-solid fa-copy"></i> Duplicar
+                                </button>
+                            </form>
                         <?php elseif (($readyToSubmitCount ?? 0) > 0): ?>
                             <form action="<?= site_url('accountability/' . $accId . '/submit') ?>" method="post">
                                 <?= csrf_field() ?>
@@ -1818,6 +1835,14 @@
                                                     <label for="reject-reason-<?= esc((string) $num) ?>">
                                                         Informe o motivo da rejeição para orientar o usuário sobre o que precisa ser corrigido:
                                                     </label>
+                                                    <div style="display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.4rem 0 0.5rem;">
+                                                        <?php foreach (\App\Services\ItemReviewService::REJECTION_PRESETS as $preset): ?>
+                                                            <button type="button" class="js-reject-preset" data-item="<?= esc((string) $num) ?>" data-text="<?= esc($preset) ?>"
+                                                                    style="border: 1px solid #fecaca; background: #fff5f5; color: #b91c1c; border-radius: 999px; padding: 0.2rem 0.6rem; font-size: 0.75rem; cursor: pointer;">
+                                                                <?= esc(rtrim($preset, '.')) ?>
+                                                            </button>
+                                                        <?php endforeach; ?>
+                                                    </div>
                                                     <textarea
                                                         id="reject-reason-<?= esc((string) $num) ?>"
                                                         class="rejection-textarea"
@@ -2223,6 +2248,17 @@
                         rejectBox.classList.add('open');
                         if (textarea) textarea.focus();
                     }
+                });
+            });
+
+            // Motivos prontos: preenchem o campo (o texto ainda pode ser editado)
+            document.querySelectorAll('.js-reject-preset').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    const textarea = document.getElementById('reject-reason-' + this.getAttribute('data-item'));
+                    if (!textarea) return;
+                    const text = this.getAttribute('data-text') || '';
+                    textarea.value = textarea.value.trim() ? textarea.value.trim() + ' ' + text : text;
+                    textarea.focus();
                 });
             });
 

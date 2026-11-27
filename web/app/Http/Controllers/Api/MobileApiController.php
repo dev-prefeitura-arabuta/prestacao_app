@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Exceptions\ActionException;
 use App\Http\Controllers\AnnualHistoryController;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\ReviewController;
+use App\Http\Controllers\UsersController;
 use App\Models\Accountability;
 use App\Models\AccountabilityAttachment;
 use App\Models\AccountabilityHistory;
@@ -18,6 +20,8 @@ use App\Models\WhatsappConfig;
 use App\Services\AccountabilityListingService;
 use App\Services\AccountabilitySubmissionService;
 use App\Services\AttachmentService;
+use App\Services\ItemReviewService;
+use App\Services\PendingByUserService;
 use App\Services\GeminiSummaryService;
 use App\Services\MobileTokenService;
 use App\Services\OpenWaService;
@@ -28,6 +32,7 @@ use App\Support\Actor;
 use App\Support\DateInput;
 use App\Support\Phone;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 use Throwable;
@@ -78,8 +83,12 @@ class MobileApiController extends Controller
 
         $user = User::where('email', $email)->first();
         if (! $user || ! password_verify($password, (string) $user->password_hashed)) {
+            Log::warning('Falha de login (app)', ['email' => $email, 'ip' => $request->ip()]);
+
             return response()->json(['success' => false, 'error' => 'E-mail ou senha inválidos.'], 401);
         }
+
+        Log::info('Login (app)', ['user_id' => (int) $user->id, 'email' => (string) $user->email, 'ip' => $request->ip()]);
 
         return response()->json([
             'success' => true,
@@ -231,6 +240,8 @@ class MobileApiController extends Controller
             'email'      => (string) $user->email,
             'whatsapp'   => (string) ($user->whatsapp ?? ''),
             'role'       => (string) ($user->role ?? 'user'),
+            // Conta de desenvolvedor: o app mostra só o perfil (logs e configurações ficam no web)
+            'is_developer' => $user->isDeveloper(),
             'avatar_url' => ! empty($user->avatar)
                 ? '/api/mobile/avatar/' . (int) $user->id . '?v=' . time()
                 : null,
@@ -455,6 +466,7 @@ class MobileApiController extends Controller
                 'all_items_filled' => $allItemsFilled && ! empty($checklist),
                 'can_submit'       => ! $isAdmin && $allItemsFilled && ! empty($checklist) && $hasSubmittableItem,
                 'admin_contacts'   => $adminContacts,
+                'rejection_presets' => $isAdmin ? ItemReviewService::REJECTION_PRESETS : [],
                 'items'            => $checklist,
             ],
         ]);
@@ -615,9 +627,84 @@ class MobileApiController extends Controller
         ]);
     }
 
+    public function updateItemStatus(Request $request, int $id, int $itemNumber, ItemReviewService $review)
+    {
+        try {
+            $result = $review->setStatus(
+                Actor::fromUser($request->user()),
+                $id,
+                $itemNumber,
+                (string) $request->input('status', ''),
+                (string) $request->input('rejection_reason', '')
+            );
+        } catch (ActionException $e) {
+            return $this->actionError($e);
+        } catch (Throwable $e) {
+            report($e);
+            return response()->json(['success' => false, 'error' => 'Erro ao atualizar a situação do item.'], 500);
+        }
+
+        $message = "Item {$itemNumber} marcado como {$result['label']}.";
+        if ($result['status'] === 'rejeitado') {
+            $message .= $result['notified'] > 0
+                ? ' O usuário foi avisado do motivo.'
+                : ' Não foi possível avisar o usuário automaticamente (e-mail/WhatsApp inativos ou sem contato).';
+        }
+
+        return response()->json(['success' => true, 'message' => $message] + $result);
+    }
+
+    public function confirmAllSent(Request $request, int $id, ItemReviewService $review)
+    {
+        try {
+            $count = $review->confirmAllSent(Actor::fromUser($request->user()), $id);
+        } catch (ActionException $e) {
+            return $this->actionError($e);
+        }
+
+        return response()->json([
+            'success'   => true,
+            'confirmed' => $count,
+            'message'   => $count > 0 ? "{$count} item(ns) confirmado(s)." : 'Não há itens enviados aguardando avaliação.',
+        ]);
+    }
+
+    public function reviewQueue(ItemReviewService $review)
+    {
+        return response()->json(['success' => true, 'data' => $review->reviewQueue()]);
+    }
+
+    public function pendingByUser(PendingByUserService $pending)
+    {
+        $rows = array_map(static function (array $row) {
+            $row['reminder_text'] = ReviewController::reminderText($row);
+
+            return $row;
+        }, $pending->build());
+
+        return response()->json(['success' => true, 'data' => $rows]);
+    }
+
     public function uploadAttachment(Request $request, int $id, int $itemNumber, AttachmentService $attachments)
     {
         $actor = Actor::fromUser($request->user());
+
+        // Fila offline do app: o mesmo envio pode chegar mais de uma vez
+        $clientUploadId = trim((string) $request->input('client_upload_id', ''));
+        if ($clientUploadId !== '') {
+            if (! AttachmentService::isValidClientUploadId($clientUploadId)) {
+                return response()->json(['success' => false, 'error' => 'Identificador de envio inválido.'], 422);
+            }
+
+            $existing = $attachments->findByClientUploadId($actor, $clientUploadId);
+            if ($existing !== null) {
+                return response()->json([
+                    'success'    => true,
+                    'duplicate'  => true,
+                    'attachment' => $this->formatAttachment($existing),
+                ]);
+            }
+        }
 
         $file = $request->file('file');
         if (! $file) {
@@ -626,7 +713,7 @@ class MobileApiController extends Controller
 
         try {
             $attachments->assertCanUpload($actor, $id, $itemNumber);
-            $att = $attachments->store($actor, $id, $itemNumber, $file);
+            $att = $attachments->store($actor, $id, $itemNumber, $file, $clientUploadId !== '' ? $clientUploadId : null);
         } catch (ActionException $e) {
             return $this->actionError($e);
         } catch (Throwable $e) {
@@ -638,13 +725,19 @@ class MobileApiController extends Controller
 
         return response()->json([
             'success'    => true,
-            'attachment' => [
-                'id'            => (int) $att->id,
-                'original_name' => (string) $att->original_name,
-                'file_ext'      => (string) $att->file_ext,
-                'file_size'     => (int) $att->file_size,
-            ],
+            'duplicate'  => false,
+            'attachment' => $this->formatAttachment($att),
         ]);
+    }
+
+    private function formatAttachment(AccountabilityAttachment $att): array
+    {
+        return [
+            'id'            => (int) $att->id,
+            'original_name' => (string) $att->original_name,
+            'file_ext'      => (string) $att->file_ext,
+            'file_size'     => (int) $att->file_size,
+        ];
     }
 
     public function previewAttachment(Request $request, int $attachmentId, AttachmentService $attachments)
@@ -796,8 +889,10 @@ class MobileApiController extends Controller
     {
         $user = $request->user();
 
-        $list = User::visibleTo($user->isDeveloper())->orderBy('id', 'asc')->get()->map(static fn ($u) => [
+        $primaryId = User::primaryAdminId();
+        $list      = User::visibleTo($user->isDeveloper())->orderBy('id', 'asc')->get()->map(static fn ($u) => [
             'id'       => (int) $u->id,
+            'is_primary_admin' => (int) $u->id === $primaryId,
             'name'     => (string) $u->name,
             'email'    => (string) $u->email,
             'whatsapp' => (string) ($u->whatsapp ?? ''),
@@ -834,6 +929,8 @@ class MobileApiController extends Controller
                 'email'         => (string) $target->email,
                 'whatsapp'      => (string) ($target->whatsapp ?? ''),
                 'role'          => (string) ($target->role ?? 'user'),
+                // Administrador principal: o app trava a troca de perfil
+                'is_primary_admin' => $target->isPrimaryAdmin(),
                 'allowed_items' => array_map('intval', $allowed),
                 'all_items'     => $allItems,
             ],
@@ -879,6 +976,10 @@ class MobileApiController extends Controller
                 'whatsapp' => Phone::format($whatsapp),
                 'role'     => (string) $request->input('role'),
             ];
+
+            if ($target->isPrimaryAdmin() && $data['role'] !== 'admin') {
+                return response()->json(['success' => false, 'error' => UsersController::PRIMARY_ADMIN_ROLE_MSG], 422);
+            }
 
             if ($target->isDeveloper()) {
                 $data['role'] = 'admin';

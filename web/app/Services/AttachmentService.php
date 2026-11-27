@@ -58,8 +58,13 @@ class AttachmentService
      *
      * @throws ActionException
      */
-    public function store(Actor $actor, int $accountabilityId, int $itemNumber, UploadedFile $file): AccountabilityAttachment
-    {
+    public function store(
+        Actor $actor,
+        int $accountabilityId,
+        int $itemNumber,
+        UploadedFile $file,
+        ?string $clientUploadId = null
+    ): AccountabilityAttachment {
         $ext = UploadedFiles::validate($file, self::ALLOWED_EXTENSIONS, self::MAX_BYTES, self::INVALID_TYPE_MSG);
 
         $relDir = 'uploads/accountability/' . $accountabilityId . '/item_' . $itemNumber;
@@ -74,6 +79,7 @@ class AttachmentService
             'accountability_id' => $accountabilityId,
             'item_number'       => $itemNumber,
             'user_id'           => $actor->id,
+            'client_upload_id'  => $clientUploadId,
             'original_name'     => $originalName,
             'file_name'         => $newName,
             'file_path'         => $relDir . '/' . $newName,
@@ -81,6 +87,23 @@ class AttachmentService
             'file_size'         => $size,
             'created_at'        => now()->format('Y-m-d H:i:s'),
         ]);
+    }
+
+    /**
+     * Anexo já gravado por este usuário com o mesmo identificador da fila offline do app
+     * (reenvio após a conexão cair antes da resposta chegar).
+     */
+    public function findByClientUploadId(Actor $actor, string $clientUploadId): ?AccountabilityAttachment
+    {
+        return AccountabilityAttachment::where('client_upload_id', $clientUploadId)
+            ->where('user_id', $actor->id)
+            ->first();
+    }
+
+    /** Identificador aceito: 8 a 64 caracteres entre letras, números, "-" e "_". */
+    public static function isValidClientUploadId(string $id): bool
+    {
+        return preg_match('/^[A-Za-z0-9_-]{8,64}$/', $id) === 1;
     }
 
     /**

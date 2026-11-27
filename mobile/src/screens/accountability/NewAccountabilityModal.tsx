@@ -13,11 +13,14 @@ export function NewAccountabilityModal({
   onClose,
   token,
   onCreated,
+  initial,
 }: {
   visible: boolean;
   onClose: () => void;
   token: string;
   onCreated: () => void;
+  /** Valores iniciais (usado em "Duplicar": copia título, descrição e itens de outra prestação). */
+  initial?: { title: string; description: string; enabledItems: number[] };
 }) {
   const [title, setTitle] = useState('');
   const [desc, setDesc] = useState('');
@@ -28,11 +31,11 @@ export function NewAccountabilityModal({
   // Formulário sempre começa limpo ao abrir
   useEffect(() => {
     if (!visible) return;
-    setTitle('');
-    setDesc('');
+    setTitle(initial?.title ?? '');
+    setDesc(initial?.description ?? '');
     setDeadline('');
-    setEnabledItems(ALL_CHECKLIST_NUMS);
-  }, [visible]);
+    setEnabledItems(initial?.enabledItems ?? ALL_CHECKLIST_NUMS);
+  }, [visible, initial]);
 
   async function handleCreate() {
     const cleanTitle = title.trim();
@@ -69,7 +72,7 @@ export function NewAccountabilityModal({
   ];
 
   return (
-    <FormModal visible={visible} onClose={onClose} title="Nova Prestação de Contas">
+    <FormModal visible={visible} onClose={onClose} title={initial ? 'Duplicar Prestação de Contas' : 'Nova Prestação de Contas'}>
       <ScrollView keyboardShouldPersistTaps="handled">
         <Text style={styles.label}>Título *</Text>
         <TextInput

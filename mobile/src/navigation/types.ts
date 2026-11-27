@@ -3,6 +3,8 @@ export type GuestScreen = 'home' | 'login' | 'forgot';
 export type AppScreen =
   | 'menu'
   | 'accountabilities'
+  | 'review'
+  | 'pending_people'
   | 'annual_history'
   | 'audit'
   | 'users'

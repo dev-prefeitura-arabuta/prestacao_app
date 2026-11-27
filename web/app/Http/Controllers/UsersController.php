@@ -13,6 +13,8 @@ use Throwable;
 
 class UsersController extends Controller
 {
+    public const PRIMARY_ADMIN_ROLE_MSG = 'O administrador principal sempre será administrador e não pode virar usuário comum.';
+
     public function index()
     {
         $role            = session('user_role') ?? session('role') ?? 'admin';
@@ -37,6 +39,7 @@ class UsersController extends Controller
             'userRole'        => $role,
             'users'           => $users,
             'userPermissions' => $userPermissions,
+            'primaryAdminId'  => User::primaryAdminId(),
         ]);
     }
 
@@ -120,6 +123,7 @@ class UsersController extends Controller
             'user'                => $user->toArray(),
             'accountabilityItems' => Accountability::getItems(),
             'allowedItems'        => $allowedItems,
+            'isPrimaryAdmin'      => $user->isPrimaryAdmin(),
         ]);
     }
 
@@ -160,6 +164,10 @@ class UsersController extends Controller
                 'whatsapp' => Phone::format($whatsapp),
                 'role'     => (string) $request->input('role'),
             ];
+
+            if ($user->isPrimaryAdmin() && $data['role'] !== 'admin') {
+                return back()->withInput()->with('error', self::PRIMARY_ADMIN_ROLE_MSG);
+            }
 
             // Conta de desenvolvedor é sempre administrador
             if ($user->isDeveloper()) {
@@ -203,6 +211,10 @@ class UsersController extends Controller
                 return redirect('/users')->with('error', 'Usuário não encontrado.');
             }
 
+            if ($user->isPrimaryAdmin()) {
+                return redirect('/users')->with('error', 'O administrador principal não pode ser excluído.');
+            }
+
             UserAccountabilityPermission::where('user_id', $id)->delete();
             $name = $user->name;
             $user->delete();
@@ -228,6 +240,10 @@ class UsersController extends Controller
 
             if ($user->isDeveloper() && $newRole !== 'admin') {
                 return back()->with('error', 'A conta de desenvolvedor precisa ser administrador.');
+            }
+
+            if ($user->isPrimaryAdmin() && $newRole !== 'admin') {
+                return back()->with('error', self::PRIMARY_ADMIN_ROLE_MSG);
             }
 
             $user->update(['role' => $newRole]);
