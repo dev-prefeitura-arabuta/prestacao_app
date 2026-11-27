@@ -81,10 +81,6 @@ class AnnualHistoryController extends Controller
     private function renderAnnualView(?int $selectedYear)
     {
         $role = session('user_role') ?? session('role') ?? 'user';
-        if ($role !== 'admin') {
-            return redirect('/accountability')->with('error', 'Acesso restrito a administradores.');
-        }
-
         $allAccs = [];
         try {
             $allAccs = Accountability::orderBy('created_at', 'desc')

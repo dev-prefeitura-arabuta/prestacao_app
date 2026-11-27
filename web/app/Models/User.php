@@ -15,5 +15,6 @@ class User extends Model
         'password_hashed',
         'role',
         'avatar',
+        'notifications_enabled',
     ];
 }

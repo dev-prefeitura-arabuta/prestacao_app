@@ -14,6 +14,8 @@ $app = Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'auth.session' => \App\Http\Middleware\AuthSessionMiddleware::class,
+            'auth.mobile'  => \App\Http\Middleware\MobileTokenAuth::class,
+            'admin'        => \App\Http\Middleware\EnsureAdmin::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

@@ -432,6 +432,7 @@
                         <div class="kpi-sub">Itens enviados ou confirmados</div>
                     </div>
 
+                    <?php /* Modo Planilha ocultado
                     <div class="kpi-card">
                         <div class="kpi-label">Despesas (Planilha)</div>
                         <div class="kpi-value" style="color: #b91c1c;">
@@ -441,12 +442,13 @@
                             Receitas: R$ <?= number_format((float) ($kpis['total_receitas'] ?? 0), 2, ',', '.') ?>
                         </div>
                     </div>
+                    */ ?>
                 </div>
 
                 <div class="card">
                     <div class="card-toolbar">
                         <strong style="font-size: 0.92rem; color: #0f172a;">
-                            📊 Planilha Consolidada — <?= $selectedYear !== null ? 'Exercício ' . esc((string) $selectedYear) : 'Todos os Anos' ?> (<?= count($rows) ?>)
+                            📊 Histórico Consolidado — <?= $selectedYear !== null ? 'Exercício ' . esc((string) $selectedYear) : 'Todos os Anos' ?> (<?= count($rows) ?>)
                         </strong>
                         <div style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
                             <input type="text" id="annualSearch" class="search-input" placeholder="Filtrar por ano, título, data ou situação...">
@@ -525,7 +527,6 @@
                                             <td style="white-space: nowrap;">
                                                 <div style="display: inline-flex; gap: 0.35rem;">
                                                     <a href="<?= site_url('accountability/' . $r['id']) ?>" class="btn-sm primary">Abrir</a>
-                                                    <a href="<?= site_url('planilha?accountability_id=' . $r['id']) ?>" class="btn-sm">Planilha</a>
                                                     <a href="<?= site_url('accountability/' . $r['id'] . '/print-pdf') ?>" target="_blank" class="btn-sm">PDF</a>
                                                 </div>
                                             </td>

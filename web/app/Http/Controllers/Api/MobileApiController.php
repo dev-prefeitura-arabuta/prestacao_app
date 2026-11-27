@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Exceptions\ActionException;
 use App\Http\Controllers\AnnualHistoryController;
 use App\Http\Controllers\Controller;
 use App\Models\Accountability;
@@ -9,26 +10,27 @@ use App\Models\AccountabilityAttachment;
 use App\Models\AccountabilityHistory;
 use App\Models\AccountabilityItemStatus;
 use App\Models\AccountabilitySpreadsheetEntry;
-use App\Models\GeneralSettings;
-use App\Models\PasswordResetToken;
+use App\Models\AdminNotification;
 use App\Models\SmtpConfig;
 use App\Models\User;
 use App\Models\UserAccountabilityPermission;
 use App\Models\WhatsappConfig;
+use App\Services\AccountabilityListingService;
+use App\Services\AccountabilitySubmissionService;
+use App\Services\AttachmentService;
 use App\Services\GeminiSummaryService;
+use App\Services\MobileTokenService;
 use App\Services\OpenWaService;
-use App\Services\SmtpMailService;
-use App\Services\SpreadsheetAiExtractorService;
+use App\Services\PasswordResetService;
+use App\Services\ProfileService;
+use App\Support\Actor;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
 use Throwable;
 
 class MobileApiController extends Controller
 {
-    private array $allowedExtensions = ['zip', 'jpg', 'jpeg', 'png', 'webp', 'pdf'];
-    private array $allowedAvatarExtensions = ['jpg', 'jpeg', 'png', 'webp'];
-
     public function ping()
     {
         return response()->json([
@@ -40,6 +42,11 @@ class MobileApiController extends Controller
 
     public function quickLoginUsers()
     {
+        // Lista de usuários só é exposta no modo de demonstração (QUICK_LOGIN=true)
+        if (! config('app.quick_login')) {
+            return response()->json(['success' => false, 'error' => 'Login rápido desativado.'], 404);
+        }
+
         $users = User::orderByRaw("CASE WHEN role = 'admin' THEN 0 ELSE 1 END")
             ->orderBy('name', 'asc')
             ->get()
@@ -57,9 +64,9 @@ class MobileApiController extends Controller
         ]);
     }
 
-    public function login(Request $request)
+    public function login(Request $request, MobileTokenService $tokens)
     {
-        $email    = trim((string) $request->input('email', ''));
+        $email    = PasswordResetService::normalizeEmail((string) $request->input('email', ''));
         $password = (string) $request->input('password', '');
 
         if ($email === '' || $password === '') {
@@ -71,112 +78,56 @@ class MobileApiController extends Controller
             return response()->json(['success' => false, 'error' => 'E-mail ou senha inválidos.'], 401);
         }
 
-        $token = bin2hex(random_bytes(32));
-        Cache::put('mobile_token_' . hash('sha256', $token), (int) $user->id, now()->addDays(7));
-
         return response()->json([
             'success' => true,
-            'token'   => $token,
+            'token'   => $tokens->issue($user),
             'user'    => $this->formatUser($user),
         ]);
     }
 
-    public function forgotPassword(Request $request)
+    public function forgotPassword(Request $request, PasswordResetService $passwordReset)
     {
-        $email = strtolower(trim((string) $request->input('email', '')));
+        $email = PasswordResetService::normalizeEmail((string) $request->input('email', ''));
         if ($email === '' || ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
             return response()->json(['success' => false, 'error' => 'Informe um e-mail válido.'], 422);
         }
 
-        $user = User::where('email', $email)->first();
-        if (! $user) {
-            return response()->json(['success' => false, 'error' => 'Não encontramos nenhuma conta cadastrada com este e-mail.'], 404);
+        $result = $passwordReset->issueCode($email);
+        if (! $result['success']) {
+            return response()->json(['success' => false, 'error' => $result['error']], 500);
         }
 
-        try {
-            $code      = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
-            $expiresAt = now()->addSeconds(90);
-
-            PasswordResetToken::where('user_id', $user->id)
-                ->whereNull('used_at')
-                ->update(['used_at' => now()->format('Y-m-d H:i:s')]);
-
-            PasswordResetToken::create([
-                'user_id'    => (int) $user->id,
-                'email'      => $user->email,
-                'token_hash' => hash('sha256', $code),
-                'expires_at' => $expiresAt->format('Y-m-d H:i:s'),
-                'used_at'    => null,
-                'created_at' => now()->format('Y-m-d H:i:s'),
-            ]);
-
-            $genSettings = GeneralSettings::getSettings();
-            $appName     = $genSettings['app_name'] ?? 'Sistema de Prestação de Contas';
-
-            $htmlBody = '<div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;padding:20px;border:1px solid #e2e8f0;border-radius:10px;">'
-                . '<h2 style="margin:0 0 12px;color:#072c5e;">' . e($appName) . '</h2>'
-                . '<p style="color:#334155;">Olá, <strong>' . e($user->name) . '</strong>! Use o código de 6 dígitos abaixo para redefinir sua senha:</p>'
-                . '<div style="text-align:center;margin:20px 0;">'
-                . '<span style="display:inline-block;font-size:30px;font-weight:800;letter-spacing:8px;color:#dd4814;background:#fff7ed;border:1px solid #fed7aa;padding:12px 24px;border-radius:8px;">'
-                . $code . '</span></div>'
-                . '<p style="font-size:12px;color:#64748b;">Código válido por 1 minuto e 30 segundos.</p></div>';
-
-            $mailer = new SmtpMailService();
-            $sent   = $mailer->send(
-                $user->email,
-                (string) $user->name,
-                "Código de Recuperação de Senha ({$code}) - {$appName}",
-                $htmlBody,
-                "Olá {$user->name}, seu código de 6 dígitos para redefinir a senha é: {$code} (válido por 1 minuto e 30 segundos)."
-            );
-
-            if (! $sent['success']) {
-                return response()->json(['success' => false, 'error' => $sent['error'] ?: 'Falha ao enviar e-mail via SMTP.'], 500);
-            }
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Código de 6 dígitos enviado para ' . $user->email . '!',
-            ]);
-        } catch (Throwable $e) {
-            return response()->json(['success' => false, 'error' => 'Erro ao enviar código: ' . $e->getMessage()], 500);
-        }
+        return response()->json([
+            'success' => true,
+            'message' => PasswordResetService::GENERIC_SENT_MESSAGE,
+        ]);
     }
 
-    public function verifyResetCode(Request $request)
+    public function verifyResetCode(Request $request, PasswordResetService $passwordReset)
     {
-        $email = strtolower(trim((string) $request->input('email', '')));
+        $email = (string) $request->input('email', '');
         $code  = preg_replace('/\D/', '', (string) $request->input('code', '')) ?? '';
 
-        if ($email === '' || strlen($code) !== 6) {
+        if (trim($email) === '' || strlen($code) !== 6) {
             return response()->json(['success' => false, 'error' => 'Informe o e-mail e o código de 6 dígitos.'], 422);
         }
 
-        $record = PasswordResetToken::where('email', $email)
-            ->where('token_hash', hash('sha256', $code))
-            ->whereNull('used_at')
-            ->orderBy('id', 'desc')
-            ->first();
-
-        if (! $record) {
-            return response()->json(['success' => false, 'error' => 'Código inválido. Verifique os 6 dígitos enviados ao seu e-mail.'], 422);
-        }
-
-        if (strtotime((string) $record->expires_at) < time()) {
-            return response()->json(['success' => false, 'error' => 'Código expirado. Solicite um novo código.'], 422);
+        $result = $passwordReset->verifyCode($email, $code);
+        if ($result['token'] === null) {
+            return response()->json(['success' => false, 'error' => $result['error']], 422);
         }
 
         return response()->json(['success' => true, 'message' => 'Código validado! Agora defina sua nova senha.']);
     }
 
-    public function resetPassword(Request $request)
+    public function resetPassword(Request $request, PasswordResetService $passwordReset)
     {
-        $email    = strtolower(trim((string) $request->input('email', '')));
+        $email    = (string) $request->input('email', '');
         $code     = preg_replace('/\D/', '', (string) $request->input('code', '')) ?? '';
         $password = (string) $request->input('password', '');
         $confirm  = (string) $request->input('password_confirmation', '');
 
-        if ($email === '' || strlen($code) !== 6) {
+        if (trim($email) === '' || strlen($code) !== 6) {
             return response()->json(['success' => false, 'error' => 'E-mail e código de 6 dígitos são obrigatórios.'], 422);
         }
         if (strlen($password) < 6) {
@@ -186,43 +137,28 @@ class MobileApiController extends Controller
             return response()->json(['success' => false, 'error' => 'A confirmação de senha não confere.'], 422);
         }
 
-        $record = PasswordResetToken::where('email', $email)
-            ->where('token_hash', hash('sha256', $code))
-            ->whereNull('used_at')
-            ->orderBy('id', 'desc')
-            ->first();
-
-        if (! $record) {
-            return response()->json(['success' => false, 'error' => 'Código inválido ou já utilizado.'], 422);
+        $result = $passwordReset->verifyCode($email, $code);
+        if ($result['token'] === null) {
+            return response()->json(['success' => false, 'error' => $result['error']], 422);
         }
 
-        $user = User::find((int) $record->user_id);
-        if (! $user) {
-            return response()->json(['success' => false, 'error' => 'Usuário não encontrado.'], 404);
+        if (! $passwordReset->resetPassword($result['token'], $password)) {
+            return response()->json(['success' => false, 'error' => 'Não foi possível redefinir a senha. Solicite um novo código.'], 422);
         }
-
-        $user->update(['password_hashed' => password_hash($password, PASSWORD_DEFAULT)]);
-        $record->update(['used_at' => now()->format('Y-m-d H:i:s')]);
 
         return response()->json(['success' => true, 'message' => 'Senha redefinida com sucesso! Faça login com sua nova senha.']);
     }
 
-    public function logout(Request $request)
+    public function logout(Request $request, MobileTokenService $tokens)
     {
-        $token = $this->extractBearerToken($request);
-        if ($token !== '') {
-            Cache::forget('mobile_token_' . hash('sha256', $token));
-        }
+        $tokens->revoke(MobileTokenService::extractToken($request));
 
         return response()->json(['success' => true]);
     }
 
     public function me(Request $request)
     {
-        $user = $this->authenticate($request);
-        if (! $user) {
-            return response()->json(['success' => false, 'error' => 'Não autenticado.'], 401);
-        }
+        $user = $request->user();
 
         return response()->json([
             'success' => true,
@@ -230,167 +166,58 @@ class MobileApiController extends Controller
         ]);
     }
 
-    public function updateProfile(Request $request)
+    public function updateProfile(Request $request, ProfileService $profiles)
     {
-        $user = $this->authenticate($request);
-        if (! $user) {
-            return response()->json(['success' => false, 'error' => 'Não autenticado.'], 401);
-        }
-
-        $userId = (int) $user->id;
-        $validator = Validator::make($request->all(), [
-            'name'             => 'required|min:3|max:100',
-            'email'            => "required|email|max:100|unique:users,email,{$userId}",
-            'whatsapp'         => 'nullable|max:30',
-            'new_password'     => 'nullable|min:6',
-            'confirm_password' => 'same:new_password',
-        ], [
-            'name.required'         => 'O nome é obrigatório.',
-            'name.min'              => 'O nome deve ter pelo menos 3 caracteres.',
-            'email.required'        => 'O e-mail é obrigatório.',
-            'email.email'           => 'Informe um e-mail válido.',
-            'email.unique'          => 'Este e-mail já está sendo utilizado por outro usuário.',
-            'whatsapp.max'          => 'O número de WhatsApp deve ter no máximo 30 caracteres.',
-            'new_password.min'      => 'A nova senha deve ter pelo menos 6 caracteres.',
-            'confirm_password.same' => 'A confirmação de senha não confere com a nova senha.',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'error'   => $validator->errors()->first(),
-            ], 422);
-        }
-
         try {
-            $name        = trim((string) $request->input('name'));
-            $email       = trim((string) $request->input('email'));
-            $whatsapp    = trim((string) $request->input('whatsapp', ''));
-            $newPassword = (string) $request->input('new_password', '');
-            $avatarPath  = $user->avatar;
-
-            if ($request->hasFile('avatar')) {
-                $avatarFile = $request->file('avatar');
-                if (! $avatarFile->isValid()) {
-                    $errCode = $avatarFile->getError();
-                    if (in_array($errCode, [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true)) {
-                        return response()->json(['success' => false, 'error' => 'A foto excede o limite de tamanho permitido pelo servidor.'], 413);
-                    }
-                    return response()->json(['success' => false, 'error' => 'Não foi possível processar a imagem enviada.'], 422);
-                }
-
-                $ext = strtolower((string) $avatarFile->getClientOriginalExtension());
-                if ($ext === '' || ! in_array($ext, $this->allowedAvatarExtensions, true)) {
-                    $mime = strtolower((string) $avatarFile->getMimeType());
-                    $ext  = match ($mime) {
-                        'image/jpeg', 'image/jpg', 'image/pjpeg' => 'jpg',
-                        'image/png'                              => 'png',
-                        'image/webp'                             => 'webp',
-                        default                                  => $ext,
-                    };
-                }
-
-                if (! in_array($ext, $this->allowedAvatarExtensions, true)) {
-                    return response()->json(['success' => false, 'error' => 'Formato de imagem inválido. Utilize JPG, JPEG, PNG ou WEBP.'], 422);
-                }
-
-                if ($avatarFile->getSize() > 5 * 1024 * 1024) {
-                    return response()->json(['success' => false, 'error' => 'A foto de perfil deve ter no máximo 5 MB.'], 422);
-                }
-
-                $targetDir = storage_path('app/uploads/avatars');
-                if (! is_dir($targetDir)) {
-                    mkdir($targetDir, 0775, true);
-                }
-
-                if (! empty($avatarPath)) {
-                    $oldFullPath = storage_path('app/' . $avatarPath);
-                    if (is_file($oldFullPath)) {
-                        @unlink($oldFullPath);
-                    }
-                }
-
-                $newName = 'user_' . $userId . '_' . time() . '_' . bin2hex(random_bytes(6)) . '.' . $ext;
-                $avatarFile->move($targetDir, $newName);
-                $avatarPath = 'uploads/avatars/' . $newName;
-            }
-
-            $data = [
-                'name'     => $name,
-                'email'    => $email,
-                'whatsapp' => $whatsapp !== '' ? $whatsapp : null,
-                'avatar'   => $avatarPath,
-            ];
-
-            if ($newPassword !== '') {
-                $data['password_hashed'] = password_hash($newPassword, PASSWORD_DEFAULT);
-            }
-
-            $user->update($data);
-            $user->refresh();
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Perfil atualizado com sucesso!',
-                'user'    => $this->formatUser($user),
-            ]);
+            $user = $profiles->update(
+                $request->user(),
+                $request->only(['name', 'email', 'whatsapp', 'new_password', 'confirm_password']),
+                $request->file('avatar')
+            );
+        } catch (ValidationException $e) {
+            return response()->json(['success' => false, 'error' => $e->validator->errors()->first()], 422);
+        } catch (ActionException $e) {
+            return $this->actionError($e);
         } catch (Throwable $e) {
-            return response()->json(['success' => false, 'error' => 'Erro ao atualizar perfil: ' . $e->getMessage()], 500);
+            report($e);
+            return response()->json(['success' => false, 'error' => 'Erro ao atualizar perfil.'], 500);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Perfil atualizado com sucesso!',
+            'user'    => $this->formatUser($user),
+        ]);
+    }
+
+    public function removeAvatar(Request $request, ProfileService $profiles)
+    {
+        try {
+            $user = $profiles->removeAvatar($request->user());
+        } catch (Throwable $e) {
+            report($e);
+            return response()->json(['success' => false, 'error' => 'Erro ao remover foto.'], 500);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Foto de perfil removida com sucesso!',
+            'user'    => $this->formatUser($user),
+        ]);
+    }
+
+    public function avatar(int $id, ProfileService $profiles)
+    {
+        try {
+            return $profiles->avatarResponse($id);
+        } catch (ActionException) {
+            abort(404);
         }
     }
 
-    public function removeAvatar(Request $request)
+    private function actionError(ActionException $e)
     {
-        $user = $this->authenticate($request);
-        if (! $user) {
-            return response()->json(['success' => false, 'error' => 'Não autenticado.'], 401);
-        }
-
-        try {
-            if (! empty($user->avatar)) {
-                $fullPath = storage_path('app/' . $user->avatar);
-                if (is_file($fullPath)) {
-                    @unlink($fullPath);
-                }
-            }
-
-            $user->update(['avatar' => null]);
-            $user->refresh();
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Foto de perfil removida com sucesso!',
-                'user'    => $this->formatUser($user),
-            ]);
-        } catch (Throwable $e) {
-            return response()->json(['success' => false, 'error' => 'Erro ao remover foto: ' . $e->getMessage()], 500);
-        }
-    }
-
-    public function avatar(int $id)
-    {
-        $user = User::find($id);
-        if (! $user || empty($user->avatar)) {
-            abort(404);
-        }
-
-        $fullPath = storage_path('app/' . $user->avatar);
-        if (! is_file($fullPath)) {
-            abort(404);
-        }
-
-        $ext  = strtolower(pathinfo($fullPath, PATHINFO_EXTENSION));
-        $mime = match ($ext) {
-            'jpg', 'jpeg' => 'image/jpeg',
-            'png'         => 'image/png',
-            'webp'        => 'image/webp',
-            default       => 'application/octet-stream',
-        };
-
-        return response()->file($fullPath, [
-            'Content-Type'  => $mime,
-            'Cache-Control' => 'no-cache, must-revalidate',
-        ]);
+        return response()->json(['success' => false, 'error' => $e->getMessage()], $e->status());
     }
 
     private function formatUser(User $user): array
@@ -407,96 +234,23 @@ class MobileApiController extends Controller
         ];
     }
 
-    public function accountabilities(Request $request)
+    public function accountabilities(Request $request, AccountabilityListingService $listing)
     {
-        $user = $this->authenticate($request);
-        if (! $user) {
-            return response()->json(['success' => false, 'error' => 'Não autenticado.'], 401);
-        }
+        $items = array_map(static function (array $row) {
+            $acc = $row['accountability'];
 
-        $isAdmin      = ($user->role === 'admin');
-        $allowedItems = $isAdmin
-            ? array_keys(Accountability::getItems())
-            : UserAccountabilityPermission::getAllowedItemsForUser((int) $user->id);
-
-        $rawList     = Accountability::orderBy('id', 'desc')->get()->toArray();
-        $allAtts     = AccountabilityAttachment::select('accountability_id', 'item_number')->get()->toArray();
-        $statusRows  = AccountabilityItemStatus::all()->toArray();
-        $statusByAcc = [];
-        foreach ($statusRows as $sr) {
-            $statusByAcc[(int) $sr['accountability_id']][(int) $sr['item_number']] = (string) $sr['status'];
-        }
-
-        $attsByAccItem = [];
-        $attCounts     = [];
-        foreach ($allAtts as $a) {
-            $aid = (int) $a['accountability_id'];
-            $in  = (int) $a['item_number'];
-            if ($isAdmin || in_array($in, $allowedItems, true)) {
-                $attCounts[$aid]          = ($attCounts[$aid] ?? 0) + 1;
-                $attsByAccItem[$aid][$in] = ($attsByAccItem[$aid][$in] ?? 0) + 1;
-            }
-        }
-
-        $items = [];
-        foreach ($rawList as $acc) {
-            $aid = (int) $acc['id'];
-            if (Accountability::isFinalized($acc, $statusByAcc[$aid] ?? [])) {
-                continue;
-            }
-            if (! $isAdmin && ! empty($acc['is_paused'])) {
-                continue;
-            }
-
-            $enabled = array_keys(Accountability::getEnabledItemsForAccountability($acc));
-            $visible = $isAdmin ? $enabled : array_values(array_intersect($allowedItems, $enabled));
-            if (empty($visible)) {
-                continue;
-            }
-
-            // Para usuários não-admin: oculta prestações cujo envio já foi confirmado (sem itens rejeitados ou novos anexos pendentes)
-            if (! $isAdmin) {
-                $hasSentAny     = false;
-                $hasRejectedAny = false;
-                $hasUnsentFiles = false;
-
-                foreach ($visible as $itemNum) {
-                    $st       = $statusByAcc[$aid][$itemNum] ?? 'pendente';
-                    $hasFiles = ! empty($attsByAccItem[$aid][$itemNum]);
-
-                    if (in_array($st, ['enviado', 'confirmado'], true)) {
-                        $hasSentAny = true;
-                    } elseif ($st === 'rejeitado') {
-                        $hasRejectedAny = true;
-                    } elseif ($hasFiles && in_array($st, ['pendente', 'prazo_vencido'], true)) {
-                        $hasUnsentFiles = true;
-                    }
-                }
-
-                if ($hasSentAny && ! $hasRejectedAny && ! $hasUnsentFiles) {
-                    continue;
-                }
-            }
-
-            $filled = 0;
-            foreach ($visible as $n) {
-                if (! empty($attsByAccItem[$aid][$n])) {
-                    $filled++;
-                }
-            }
-
-            $items[] = [
-                'id'                => $aid,
+            return [
+                'id'                => (int) $acc['id'],
                 'title'             => (string) ($acc['title'] ?? ''),
                 'description'       => (string) ($acc['description'] ?? ''),
                 'deadline'          => ! empty($acc['deadline']) ? date('d/m/Y', strtotime((string) $acc['deadline'])) : 'Não definido',
                 'is_paused'         => ! empty($acc['is_paused']),
-                'attachments_count' => $attCounts[$aid] ?? 0,
-                'filled_items'      => $filled,
-                'total_items'       => count($visible),
-                'progress'          => (int) round(($filled / max(1, count($visible))) * 100),
+                'attachments_count' => $row['attachments_count'],
+                'filled_items'      => $row['filled_items'],
+                'total_items'       => $row['visible_total'],
+                'progress'          => $row['progress'],
             ];
-        }
+        }, $listing->activeFor(Actor::fromUser($request->user())));
 
         return response()->json([
             'success' => true,
@@ -506,10 +260,7 @@ class MobileApiController extends Controller
 
     public function createAccountability(Request $request)
     {
-        $user = $this->authenticate($request);
-        if (! $user || $user->role !== 'admin') {
-            return response()->json(['success' => false, 'error' => 'Apenas administradores podem criar novas prestações de contas.'], 403);
-        }
+        $user = $request->user();
 
         $title       = trim((string) $request->input('title', ''));
         $description = trim((string) $request->input('description', ''));
@@ -562,16 +313,7 @@ class MobileApiController extends Controller
                 'enabled_items' => json_encode($enabledItems),
             ]);
 
-            try {
-                AccountabilityHistory::create([
-                    'accountability_id' => (int) $acc->id,
-                    'user_id'           => (int) $user->id,
-                    'user_name'         => (string) $user->name,
-                    'action'            => 'Prestação de contas criada via Mobile com ' . count($enabledItems) . ' item(ns) habilitado(s)',
-                    'created_at'        => now()->format('Y-m-d H:i:s'),
-                ]);
-            } catch (Throwable) {
-            }
+            AccountabilityHistory::log((int) $acc->id, (int) $user->id, 'Prestação de contas criada via Mobile com ' . count($enabledItems) . ' item(ns) habilitado(s)');
 
             return response()->json([
                 'success' => true,
@@ -588,10 +330,7 @@ class MobileApiController extends Controller
 
     public function showAccountability(Request $request, int $id)
     {
-        $user = $this->authenticate($request);
-        if (! $user) {
-            return response()->json(['success' => false, 'error' => 'Não autenticado.'], 401);
-        }
+        $user = $request->user();
 
         $accObj = Accountability::find($id);
         if (! $accObj) {
@@ -697,6 +436,20 @@ class MobileApiController extends Controller
             ];
         }
 
+        $adminContacts = [];
+        if (! $isAdmin) {
+            foreach (User::where('role', 'admin')->orderBy('id', 'asc')->get() as $adm) {
+                $admDigits = preg_replace('/\D/', '', (string) ($adm->whatsapp ?? '')) ?? '';
+                if (strlen($admDigits) >= 10) {
+                    $adminContacts[] = [
+                        'id'       => (int) $adm->id,
+                        'name'     => (string) $adm->name,
+                        'whatsapp' => (string) $adm->whatsapp,
+                    ];
+                }
+            }
+        }
+
         return response()->json([
             'success' => true,
             'data'    => [
@@ -706,78 +459,86 @@ class MobileApiController extends Controller
                 'deadline'         => ! empty($acc['deadline']) ? date('d/m/Y', strtotime((string) $acc['deadline'])) : 'Não definido',
                 'all_items_filled' => $allItemsFilled && ! empty($checklist),
                 'can_submit'       => ! $isAdmin && $allItemsFilled && ! empty($checklist) && $hasSubmittableItem,
+                'admin_contacts'   => $adminContacts,
                 'items'            => $checklist,
             ],
         ]);
     }
 
-    public function submitAccountability(Request $request, int $id)
+    public function submitAccountability(Request $request, int $id, AccountabilitySubmissionService $submission)
     {
-        $user = $this->authenticate($request);
-        if (! $user) {
-            return response()->json(['success' => false, 'error' => 'Não autenticado.'], 401);
-        }
-        if ($user->role === 'admin') {
-            return response()->json(['success' => false, 'error' => 'Administradores não utilizam o envio interno de prestação.'], 403);
-        }
+        $user  = $request->user();
+        $actor = Actor::fromUser($user);
 
-        $accObj = Accountability::find($id);
-        if (! $accObj) {
-            return response()->json(['success' => false, 'error' => 'Prestação não encontrada.'], 404);
+        try {
+            $ctx = $submission->context($actor, $id);
+        } catch (ActionException $e) {
+            return $this->actionError($e);
         }
 
-        $acc          = $accObj->toArray();
-        $enabledItems = array_keys(Accountability::getEnabledItemsForAccountability($acc));
-        $allowedItems = array_values(array_intersect(
-            UserAccountabilityPermission::getAllowedItemsForUser((int) $user->id),
-            $enabledItems
-        ));
-
-        if (empty($allowedItems)) {
-            return response()->json(['success' => false, 'error' => 'Você não possui itens liberados nesta prestação.'], 403);
-        }
-
-        $attsByItem = [];
-        foreach (AccountabilityAttachment::where('accountability_id', $id)->whereIn('item_number', $allowedItems)->get() as $att) {
-            $attsByItem[(int) $att->item_number] = true;
-        }
-
-        foreach ($allowedItems as $itemNum) {
-            if (empty($attsByItem[$itemNum])) {
-                return response()->json([
-                    'success' => false,
-                    'error'   => 'Adicione pelo menos um anexo em todos os seus itens antes de confirmar o envio.',
-                ], 422);
-            }
+        // No app, o envio só é liberado quando todos os itens do usuário possuem anexo
+        if (count(array_diff($ctx['allowed'], $ctx['with_files'])) > 0) {
+            return response()->json([
+                'success' => false,
+                'error'   => 'Adicione pelo menos um anexo em todos os seus itens antes de confirmar o envio.',
+            ], 422);
         }
 
         try {
-            $sentCount = 0;
-            foreach ($allowedItems as $itemNum) {
-                $existing = AccountabilityItemStatus::where('accountability_id', $id)
-                    ->where('item_number', $itemNum)
-                    ->first();
+            $result    = $submission->submit($actor, $ctx['accountability'], $ctx['allowed'], $ctx['enabled'], ' via Mobile');
+            $sentCount = $result['sent_count'];
 
-                if ($existing === null || in_array($existing->status, ['pendente', 'rejeitado', 'prazo_vencido'], true)) {
-                    AccountabilityItemStatus::setStatus($id, $itemNum, 'enviado', (int) $user->id);
-                    $sentCount++;
+            $allAccountabilityFilled = $result['all_filled'];
+            $notifyAdmin             = (bool) $request->input('notify_admin', true);
+            $accTitle                = (string) ($ctx['accountability']->title ?: "Prestação #{$id}");
+
+            $waMessage   = $allAccountabilityFilled
+                ? "Olá! ✅ Todos os anexos foram enviados na prestação de contas *{$accTitle}* (envio finalizado por {$user->name}). Já está pronta para conferência!"
+                : "Olá! ✅ Todos os anexos de *{$user->name}* foram enviados na prestação de contas *{$accTitle}* ({$sentCount} item(ns)).";
+
+            $adminWaLinks = [];
+            $sentViaApi   = false;
+            $waCfg        = null;
+            try {
+                $waCfg = WhatsappConfig::first();
+            } catch (Throwable) {
+            }
+            $waApiActive = $notifyAdmin && $waCfg && (int) ($waCfg->status ?? 0) === 1;
+
+            foreach (User::where('role', 'admin')->orderBy('id', 'asc')->get() as $adm) {
+                $digits = preg_replace('/\D/', '', (string) ($adm->whatsapp ?? '')) ?? '';
+                if (strlen($digits) < 10) {
+                    continue;
+                }
+                if (strlen($digits) <= 11 && ! str_starts_with($digits, '55')) {
+                    $digits = '55' . $digits;
+                }
+
+                $adminWaLinks[] = [
+                    'id'    => (int) $adm->id,
+                    'name'  => (string) $adm->name,
+                    'phone' => (string) $adm->whatsapp,
+                    'url'   => 'https://wa.me/' . $digits . '?text=' . rawurlencode($waMessage),
+                ];
+
+                if ($waApiActive) {
+                    try {
+                        $waService = new OpenWaService();
+                        $res       = $waService->sendText($digits, $waMessage);
+                        if (! empty($res['success'])) {
+                            $sentViaApi = true;
+                        }
+                    } catch (Throwable) {
+                    }
                 }
             }
 
-            try {
-                AccountabilityHistory::create([
-                    'accountability_id' => $id,
-                    'user_id'           => (int) $user->id,
-                    'user_name'         => (string) $user->name,
-                    'action'            => "Enviou documentos da prestação de contas ({$sentCount} item(ns)) para análise via Mobile",
-                    'created_at'        => now()->format('Y-m-d H:i:s'),
-                ]);
-            } catch (Throwable) {
-            }
-
             return response()->json([
-                'success' => true,
-                'message' => 'Envio confirmado! Sua prestação de contas foi encaminhada para avaliação do Administrador.',
+                'success'                   => true,
+                'message'                   => 'Envio confirmado! Sua prestação de contas foi encaminhada para avaliação do Administrador.',
+                'all_accountability_filled' => $allAccountabilityFilled,
+                'notified_via_api'          => $sentViaApi,
+                'admin_wa_links'            => $adminWaLinks,
             ]);
         } catch (Throwable $e) {
             return response()->json(['success' => false, 'error' => 'Erro ao confirmar envio: ' . $e->getMessage()], 500);
@@ -786,10 +547,7 @@ class MobileApiController extends Controller
 
     public function remindWhatsapp(Request $request, int $id)
     {
-        $admin = $this->authenticate($request);
-        if (! $admin || $admin->role !== 'admin') {
-            return response()->json(['success' => false, 'error' => 'Acesso restrito a administradores.'], 403);
-        }
+        $admin = $request->user();
 
         $acc = Accountability::find($id);
         if (! $acc) {
@@ -854,17 +612,8 @@ class MobileApiController extends Controller
             $apiNote = $e->getMessage();
         }
 
-        try {
-            $itemInfo = $itemNumber > 0 ? " (Item {$itemNumber})" : '';
-            AccountabilityHistory::create([
-                'accountability_id' => $id,
-                'user_id'           => (int) $admin->id,
-                'user_name'         => (string) $admin->name,
-                'action'            => "Enviou cobrança/lembrete via WhatsApp para {$targetUser->name}{$itemInfo}",
-                'created_at'        => now()->format('Y-m-d H:i:s'),
-            ]);
-        } catch (Throwable) {
-        }
+        $itemInfo = $itemNumber > 0 ? " (Item {$itemNumber})" : '';
+        AccountabilityHistory::log($id, (int) $admin->id, "Enviou cobrança/lembrete via WhatsApp para {$targetUser->name}{$itemInfo}");
 
         return response()->json([
             'success'      => true,
@@ -877,232 +626,69 @@ class MobileApiController extends Controller
         ]);
     }
 
-    public function uploadAttachment(Request $request, int $id, int $itemNumber)
+    public function uploadAttachment(Request $request, int $id, int $itemNumber, AttachmentService $attachments)
     {
-        $user = $this->authenticate($request);
-        if (! $user) {
-            return response()->json(['success' => false, 'error' => 'Não autenticado.'], 401);
-        }
-
-        if ($user->role !== 'admin') {
-            $allowed = UserAccountabilityPermission::getAllowedItemsForUser((int) $user->id);
-            if (! in_array($itemNumber, $allowed, true)) {
-                return response()->json(['success' => false, 'error' => 'Você não tem permissão para anexar arquivos neste item.'], 403);
-            }
-            $st = AccountabilityItemStatus::where('accountability_id', $id)
-                ->where('item_number', $itemNumber)
-                ->first();
-            if ($st && $st->status === 'confirmado') {
-                return response()->json(['success' => false, 'error' => 'Este item já foi confirmado pelo administrador.'], 403);
-            }
-        }
+        $actor = Actor::fromUser($request->user());
 
         $file = $request->file('file');
         if (! $file) {
             return response()->json(['success' => false, 'error' => 'Nenhum arquivo recebido. Se a foto for muito grande, tente novamente com menor resolução.'], 422);
         }
-        if (! $file->isValid()) {
-            $errCode = $file->getError();
-            if (in_array($errCode, [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true)) {
-                return response()->json(['success' => false, 'error' => 'O arquivo excede o tamanho máximo permitido pelo servidor.'], 413);
-            }
-            return response()->json(['success' => false, 'error' => 'Arquivo inválido ou corrompido durante o envio.'], 422);
-        }
-
-        if ($file->getSize() > 15 * 1024 * 1024) {
-            return response()->json(['success' => false, 'error' => 'O arquivo deve ter no máximo 15 MB.'], 413);
-        }
-
-        $ext = strtolower((string) $file->getClientOriginalExtension());
-        if ($ext === '' || ! in_array($ext, $this->allowedExtensions, true)) {
-            $mime = strtolower((string) $file->getMimeType());
-            $ext  = match ($mime) {
-                'image/jpeg', 'image/jpg', 'image/pjpeg' => 'jpg',
-                'image/png'                              => 'png',
-                'image/webp'                             => 'webp',
-                'application/pdf'                        => 'pdf',
-                'application/zip', 'application/x-zip-compressed' => 'zip',
-                default                                  => $ext,
-            };
-        }
-
-        if (! in_array($ext, $this->allowedExtensions, true)) {
-            return response()->json(['success' => false, 'error' => 'Formato inválido. Use PDF, JPG, PNG, WEBP ou ZIP.'], 422);
-        }
 
         try {
-            $targetDir = storage_path('app/uploads/accountability/' . $id . '/item_' . $itemNumber);
-            if (! is_dir($targetDir) && ! @mkdir($targetDir, 0775, true) && ! is_dir($targetDir)) {
-                return response()->json(['success' => false, 'error' => 'Não foi possível criar o diretório de uploads no servidor.'], 500);
-            }
-
-            $origName = $file->getClientOriginalName() ?: ('anexo_' . time() . '.' . $ext);
-            $size     = (int) $file->getSize();
-            $newName  = time() . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
-            $file->move($targetDir, $newName);
-
-            $attModel = AccountabilityAttachment::create([
-                'accountability_id' => $id,
-                'item_number'       => $itemNumber,
-                'user_id'           => (int) $user->id,
-                'original_name'     => $origName,
-                'file_name'         => $newName,
-                'file_path'         => 'uploads/accountability/' . $id . '/item_' . $itemNumber . '/' . $newName,
-                'file_ext'          => $ext,
-                'file_size'         => $size,
-                'created_at'        => now()->format('Y-m-d H:i:s'),
-            ]);
+            $attachments->assertCanUpload($actor, $id, $itemNumber);
+            $att = $attachments->store($actor, $id, $itemNumber, $file);
+        } catch (ActionException $e) {
+            return $this->actionError($e);
         } catch (Throwable $e) {
-            return response()->json(['success' => false, 'error' => 'Erro ao salvar anexo no servidor: ' . $e->getMessage()], 500);
+            report($e);
+            return response()->json(['success' => false, 'error' => 'Erro ao salvar anexo no servidor.'], 500);
         }
 
-        // Extração automática para a planilha via IA/OCR
-        try {
-            $accRow    = Accountability::find($id);
-            $extractor = new SpreadsheetAiExtractorService();
-            $extRes    = $extractor->extractEntries(
-                $accRow ? $accRow->toArray() : ['id' => $id, 'title' => "Prestação #{$id}"],
-                [$attModel->toArray()]
-            );
-            if (! empty($extRes['success']) && ! empty($extRes['entries'])) {
-                foreach ($extRes['entries'] as $entry) {
-                    AccountabilitySpreadsheetEntry::create([
-                        'accountability_id' => $id,
-                        'item_number'       => $entry['item_number'] ?: $itemNumber,
-                        'attachment_id'     => (int) $attModel->id,
-                        'entry_date'        => $entry['entry_date'],
-                        'document_number'   => $entry['document_number'],
-                        'supplier_name'     => $entry['supplier_name'],
-                        'cnpj_cpf'          => $entry['cnpj_cpf'],
-                        'description'       => $entry['description'],
-                        'entry_type'        => $entry['entry_type'],
-                        'amount'            => $entry['amount'],
-                        'notes'             => $entry['notes'],
-                        'created_by'        => (int) $user->id,
-                    ]);
-                }
-            }
-        } catch (Throwable) {
-        }
+        AccountabilityHistory::log($id, $actor->id, "Anexou 1 arquivo(s) no Item {$itemNumber} via Mobile");
 
         return response()->json([
             'success'    => true,
             'attachment' => [
-                'id'            => (int) $attModel->id,
-                'original_name' => $origName,
-                'file_ext'      => $ext,
-                'file_size'     => $size,
+                'id'            => (int) $att->id,
+                'original_name' => (string) $att->original_name,
+                'file_ext'      => (string) $att->file_ext,
+                'file_size'     => (int) $att->file_size,
             ],
         ]);
     }
 
-    public function previewAttachment(Request $request, int $attachmentId)
+    public function previewAttachment(Request $request, int $attachmentId, AttachmentService $attachments)
     {
-        $user = $this->authenticate($request);
-        if (! $user) {
-            return response()->json(['success' => false, 'error' => 'Não autenticado.'], 401);
+        try {
+            $att = $attachments->findViewable(Actor::fromUser($request->user()), $attachmentId);
+
+            return $attachments->inlineResponse($att);
+        } catch (ActionException $e) {
+            return $this->actionError($e);
         }
-
-        $att = AccountabilityAttachment::find($attachmentId);
-        if (! $att) {
-            return response()->json(['success' => false, 'error' => 'Anexo não encontrado.'], 404);
-        }
-
-        if ($user->role !== 'admin') {
-            $allowed = UserAccountabilityPermission::getAllowedItemsForUser((int) $user->id);
-            if (! in_array((int) $att->item_number, $allowed, true)) {
-                return response()->json(['success' => false, 'error' => 'Sem permissão para visualizar este anexo.'], 403);
-            }
-        }
-
-        $fullPath = storage_path('app/' . $att->file_path);
-        if (! is_file($fullPath)) {
-            return response()->json(['success' => false, 'error' => 'Arquivo físico não encontrado.'], 404);
-        }
-
-        $ext  = strtolower((string) $att->file_ext);
-        $mime = match ($ext) {
-            'pdf'        => 'application/pdf',
-            'jpg', 'jpeg' => 'image/jpeg',
-            'png'        => 'image/png',
-            'webp'       => 'image/webp',
-            'zip'        => 'application/zip',
-            default      => 'application/octet-stream',
-        };
-
-        $origName  = (string) ($att->original_name ?: ('anexo.' . $ext));
-        $asciiName = preg_replace('/[^A-Za-z0-9._-]/', '_', $origName) ?: ('anexo.' . $ext);
-
-        return response()->file($fullPath, [
-            'Content-Type'        => $mime,
-            'Content-Disposition' => 'inline; filename="' . $asciiName . '"; filename*=UTF-8\'\'' . rawurlencode($origName),
-            'Cache-Control'       => 'no-cache, must-revalidate',
-        ]);
     }
 
-    public function deleteAttachment(Request $request, int $attachmentId)
+    public function deleteAttachment(Request $request, int $attachmentId, AttachmentService $attachments)
     {
-        $user = $this->authenticate($request);
-        if (! $user) {
-            return response()->json(['success' => false, 'error' => 'Não autenticado.'], 401);
-        }
-
-        $att = AccountabilityAttachment::find($attachmentId);
-        if (! $att) {
-            return response()->json(['success' => false, 'error' => 'Anexo não encontrado.'], 404);
-        }
-
-        $accId   = (int) $att->accountability_id;
-        $itemNum = (int) $att->item_number;
-
-        if ($user->role !== 'admin') {
-            $allowed = UserAccountabilityPermission::getAllowedItemsForUser((int) $user->id);
-            if (! in_array($itemNum, $allowed, true)) {
-                return response()->json(['success' => false, 'error' => 'Sem permissão para remover este anexo.'], 403);
-            }
-            $st = AccountabilityItemStatus::where('accountability_id', $accId)
-                ->where('item_number', $itemNum)
-                ->first();
-            if ($st && $st->status === 'confirmado') {
-                return response()->json(['success' => false, 'error' => 'Este item já foi confirmado pelo administrador.'], 403);
-            }
-        }
-
         try {
-            $fullPath = storage_path('app/' . $att->file_path);
-            if (is_file($fullPath)) {
-                @unlink($fullPath);
-            }
-
-            try {
-                AccountabilitySpreadsheetEntry::where('attachment_id', $attachmentId)->delete();
-            } catch (Throwable) {
-            }
-
-            $att->delete();
-
-            $remaining = AccountabilityAttachment::where('accountability_id', $accId)
-                ->where('item_number', $itemNum)
-                ->count();
-            if ($remaining === 0) {
-                AccountabilityItemStatus::setStatus($accId, $itemNum, 'pendente', (int) $user->id);
-            }
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Anexo removido com sucesso!',
-            ]);
+            $attachments->delete(Actor::fromUser($request->user()), $attachmentId);
+        } catch (ActionException $e) {
+            return $this->actionError($e);
         } catch (Throwable $e) {
-            return response()->json(['success' => false, 'error' => 'Erro ao remover anexo: ' . $e->getMessage()], 500);
+            report($e);
+            return response()->json(['success' => false, 'error' => 'Erro ao remover anexo.'], 500);
         }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Anexo removido com sucesso!',
+        ]);
     }
 
     public function annualHistory(Request $request)
     {
-        $user = $this->authenticate($request);
-        if (! $user || $user->role !== 'admin') {
-            return response()->json(['success' => false, 'error' => 'Acesso restrito a administradores.'], 403);
-        }
+        $user = $request->user();
 
         $statusByAcc = [];
         foreach (AccountabilityItemStatus::all() as $st) {
@@ -1134,10 +720,7 @@ class MobileApiController extends Controller
 
     public function spreadsheetSummary(Request $request)
     {
-        $user = $this->authenticate($request);
-        if (! $user || $user->role !== 'admin') {
-            return response()->json(['success' => false, 'error' => 'Acesso restrito a administradores.'], 403);
-        }
+        $user = $request->user();
 
         $attCounts = [];
         foreach (AccountabilityAttachment::select('accountability_id')->get() as $att) {
@@ -1196,10 +779,7 @@ class MobileApiController extends Controller
 
     public function auditHistory(Request $request)
     {
-        $user = $this->authenticate($request);
-        if (! $user || $user->role !== 'admin') {
-            return response()->json(['success' => false, 'error' => 'Acesso restrito a administradores.'], 403);
-        }
+        $user = $request->user();
 
         $rows = [];
         try {
@@ -1213,7 +793,7 @@ class MobileApiController extends Controller
                     'id'                => (int) $h->id,
                     'accountability_id' => (int) ($h->accountability_id ?? 0),
                     'user_name'         => $usersMap[(int) ($h->user_id ?? 0)] ?? 'Sistema',
-                    'action'            => (string) ($h->action ?? $h->description ?? ''),
+                    'action'            => (string) ($h->status ?? ''),
                     'created_at'        => ! empty($h->created_at) ? date('d/m/Y H:i', strtotime((string) $h->created_at)) : '',
                 ];
             }
@@ -1225,10 +805,7 @@ class MobileApiController extends Controller
 
     public function usersList(Request $request)
     {
-        $user = $this->authenticate($request);
-        if (! $user || $user->role !== 'admin') {
-            return response()->json(['success' => false, 'error' => 'Acesso restrito a administradores.'], 403);
-        }
+        $user = $request->user();
 
         $list = User::orderBy('id', 'asc')->get()->map(static fn ($u) => [
             'id'       => (int) $u->id,
@@ -1243,10 +820,7 @@ class MobileApiController extends Controller
 
     public function showUser(Request $request, int $id)
     {
-        $auth = $this->authenticate($request);
-        if (! $auth || $auth->role !== 'admin') {
-            return response()->json(['success' => false, 'error' => 'Acesso restrito a administradores.'], 403);
-        }
+        $auth = $request->user();
 
         $target = User::find($id);
         if (! $target) {
@@ -1278,10 +852,7 @@ class MobileApiController extends Controller
 
     public function updateUser(Request $request, int $id)
     {
-        $auth = $this->authenticate($request);
-        if (! $auth || $auth->role !== 'admin') {
-            return response()->json(['success' => false, 'error' => 'Acesso restrito a administradores.'], 403);
-        }
+        $auth = $request->user();
 
         $target = User::find($id);
         if (! $target) {
@@ -1339,10 +910,7 @@ class MobileApiController extends Controller
 
     public function settingsSummary(Request $request)
     {
-        $user = $this->authenticate($request);
-        if (! $user || $user->role !== 'admin') {
-            return response()->json(['success' => false, 'error' => 'Acesso restrito a administradores.'], 403);
-        }
+        $user = $request->user();
 
         $smtp = null;
         $wa   = null;
@@ -1371,25 +939,79 @@ class MobileApiController extends Controller
         ]);
     }
 
-    private function extractBearerToken(Request $request): string
+    public function notifications(Request $request)
     {
-        $header = (string) $request->header('Authorization', '');
-        if (preg_match('/Bearer\s+(.+)/i', $header, $m)) {
-            return trim($m[1]);
+        $user = $request->user();
+
+        try {
+            $enabled = $user->notifications_enabled === null ? true : (bool) $user->notifications_enabled;
+            $rows    = AdminNotification::where('user_id', (int) $user->id)
+                ->orderBy('id', 'desc')
+                ->limit(30)
+                ->get()
+                ->map(static fn ($n) => [
+                    'id'                => (int) $n->id,
+                    'accountability_id' => $n->accountability_id ? (int) $n->accountability_id : null,
+                    'actor_name'        => (string) ($n->actor_name ?? ''),
+                    'title'             => (string) $n->title,
+                    'message'           => (string) $n->message,
+                    'is_read'           => (bool) $n->is_read,
+                    'created_at'        => $n->created_at ? date('d/m/Y H:i', strtotime((string) $n->created_at)) : '',
+                ])
+                ->all();
+
+            $unread = AdminNotification::where('user_id', (int) $user->id)
+                ->where('is_read', false)
+                ->count();
+
+            return response()->json([
+                'success'      => true,
+                'enabled'      => $enabled,
+                'unread_count' => $unread,
+                'items'        => $rows,
+            ]);
+        } catch (Throwable) {
+            return response()->json([
+                'success'      => true,
+                'enabled'      => true,
+                'unread_count' => 0,
+                'items'        => [],
+            ]);
         }
-        return trim((string) $request->query('token', ''));
     }
 
-    private function authenticate(Request $request): ?User
+    public function toggleNotifications(Request $request)
     {
-        $token = $this->extractBearerToken($request);
-        if ($token === '') {
-            return null;
-        }
-        $userId = Cache::get('mobile_token_' . hash('sha256', $token));
-        if (! $userId) {
-            return null;
-        }
-        return User::find((int) $userId);
+        $user = $request->user();
+
+        $newValue = $request->has('enabled')
+            ? (bool) $request->input('enabled')
+            : ! ((bool) ($user->notifications_enabled ?? true));
+
+        $user->update(['notifications_enabled' => $newValue]);
+
+        return response()->json([
+            'success' => true,
+            'enabled' => $newValue,
+            'message' => $newValue ? 'Notificações ativadas.' : 'Notificações pausadas.',
+        ]);
+    }
+
+    public function markNotificationRead(Request $request, int $id)
+    {
+        $user = $request->user();
+
+        AdminNotification::where('id', $id)->where('user_id', (int) $user->id)->update(['is_read' => true]);
+
+        return response()->json(['success' => true]);
+    }
+
+    public function markAllNotificationsRead(Request $request)
+    {
+        $user = $request->user();
+
+        AdminNotification::where('user_id', (int) $user->id)->where('is_read', false)->update(['is_read' => true]);
+
+        return response()->json(['success' => true]);
     }
 }

@@ -42,6 +42,13 @@ return [
     'debug' => (bool) env('APP_DEBUG', false),
 
     /*
+    | Login rápido (seleção de usuário na tela de login e endpoint
+    | /api/mobile/quick-users). Apenas para desenvolvimento/demonstração:
+    | expõe a lista de usuários. Mantenha desligado em produção.
+    */
+    'quick_login' => (bool) env('QUICK_LOGIN', false),
+
+    /*
     |--------------------------------------------------------------------------
     | Application URL
     |--------------------------------------------------------------------------

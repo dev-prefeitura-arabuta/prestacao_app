@@ -2,17 +2,17 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\ActionException;
 use App\Models\Accountability;
 use App\Models\User;
 use App\Models\UserAccountabilityPermission;
+use App\Services\ProfileService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
 use Throwable;
 
 class ProfileController extends Controller
 {
-    private array $allowedAvatarExtensions = ['jpg', 'jpeg', 'png', 'webp'];
-
     public function index()
     {
         $userId = (int) session('user_id');
@@ -59,151 +59,56 @@ class ProfileController extends Controller
         ]);
     }
 
-    public function update(Request $request)
+    public function update(Request $request, ProfileService $profiles)
     {
-        $userId = (int) session('user_id');
+        $user = User::find((int) session('user_id'));
+        if ($user === null) {
+            return redirect('/login')->with('error', 'Usuário não encontrado. Faça login novamente.');
+        }
 
-        $validator = Validator::make($request->all(), [
-            'name'             => 'required|min:3|max:100',
-            'email'            => "required|email|max:100|unique:users,email,{$userId}",
-            'whatsapp'         => 'nullable|max:30',
-            'new_password'     => 'nullable|min:6',
-            'confirm_password' => 'same:new_password',
-        ], [
-            'name.required'         => 'O nome é obrigatório.',
-            'name.min'              => 'O nome deve ter pelo menos 3 caracteres.',
-            'email.required'        => 'O e-mail é obrigatório.',
-            'email.email'           => 'Informe um e-mail válido.',
-            'email.unique'          => 'Este e-mail já está sendo utilizado por outro usuário.',
-            'whatsapp.max'          => 'O número de WhatsApp deve ter no máximo 30 caracteres.',
-            'new_password.min'      => 'A nova senha deve ter pelo menos 6 caracteres.',
-            'confirm_password.same' => 'A confirmação de senha não confere com a nova senha.',
+        try {
+            $user = $profiles->update($user, $request->only(['name', 'email', 'whatsapp', 'new_password', 'confirm_password']), $request->file('avatar'));
+        } catch (ValidationException $e) {
+            return redirect('/profile')->withInput()->with('errors_list', $e->validator->errors()->all());
+        } catch (ActionException $e) {
+            return redirect('/profile')->withInput()->with('error', $e->getMessage());
+        } catch (Throwable $e) {
+            report($e);
+            return redirect('/profile')->withInput()->with('error', 'Erro ao atualizar perfil. Tente novamente.');
+        }
+
+        session([
+            'user_name'   => $user->name,
+            'user_email'  => $user->email,
+            'user_avatar' => $user->avatar,
         ]);
 
-        if ($validator->fails()) {
-            return redirect('/profile')->withInput()->with('errors_list', $validator->errors()->all());
-        }
-
-        try {
-            $existing    = User::find($userId);
-            $name        = trim((string) $request->input('name'));
-            $email       = trim((string) $request->input('email'));
-            $whatsapp    = trim((string) $request->input('whatsapp', ''));
-            $newPassword = (string) $request->input('new_password');
-            $avatarPath  = $existing?->avatar ?? session('user_avatar');
-
-            if ($request->hasFile('avatar')) {
-                $avatarFile = $request->file('avatar');
-                if (! $avatarFile->isValid()) {
-                    return redirect('/profile')->withInput()->with('error', 'Não foi possível processar a imagem enviada.');
-                }
-
-                $ext = strtolower((string) $avatarFile->getClientOriginalExtension());
-                if (! in_array($ext, $this->allowedAvatarExtensions, true)) {
-                    return redirect('/profile')->withInput()->with('error', 'Formato de imagem inválido. Utilize JPG, JPEG, PNG ou WEBP.');
-                }
-
-                if ($avatarFile->getSize() > 5 * 1024 * 1024) {
-                    return redirect('/profile')->withInput()->with('error', 'A foto de perfil deve ter no máximo 5 MB.');
-                }
-
-                $targetDir = storage_path('app/uploads/avatars');
-                if (! is_dir($targetDir)) {
-                    mkdir($targetDir, 0775, true);
-                }
-
-                if (! empty($avatarPath)) {
-                    $oldFullPath = storage_path('app/' . $avatarPath);
-                    if (is_file($oldFullPath)) {
-                        @unlink($oldFullPath);
-                    }
-                }
-
-                $newName = 'user_' . $userId . '_' . time() . '_' . bin2hex(random_bytes(6)) . '.' . $ext;
-                $avatarFile->move($targetDir, $newName);
-                $avatarPath = 'uploads/avatars/' . $newName;
-            }
-
-            if ($existing !== null) {
-                $data = [
-                    'name'     => $name,
-                    'email'    => $email,
-                    'whatsapp' => $whatsapp !== '' ? $whatsapp : null,
-                    'avatar'   => $avatarPath,
-                ];
-
-                if ($newPassword !== '') {
-                    $data['password_hashed'] = password_hash($newPassword, PASSWORD_DEFAULT);
-                }
-
-                $existing->update($data);
-            }
-
-            session([
-                'user_name'   => $name,
-                'user_email'  => $email,
-                'user_avatar' => $avatarPath,
-            ]);
-
-            return redirect('/profile')->with('success', 'Seu perfil foi atualizado com sucesso!');
-        } catch (Throwable $e) {
-            return redirect('/profile')->withInput()->with('error', 'Erro ao atualizar perfil: ' . $e->getMessage());
-        }
+        return redirect('/profile')->with('success', 'Seu perfil foi atualizado com sucesso!');
     }
 
-    public function removeAvatar()
+    public function removeAvatar(ProfileService $profiles)
     {
-        $userId = (int) session('user_id');
-
-        try {
-            $existing = User::find($userId);
-            $oldPath  = $existing?->avatar ?? session('user_avatar');
-
-            if (! empty($oldPath)) {
-                $fullPath = storage_path('app/' . $oldPath);
-                if (is_file($fullPath)) {
-                    @unlink($fullPath);
-                }
+        $user = User::find((int) session('user_id'));
+        if ($user !== null) {
+            try {
+                $profiles->removeAvatar($user);
+            } catch (Throwable $e) {
+                report($e);
+                return redirect('/profile')->with('error', 'Erro ao remover foto de perfil.');
             }
-
-            if ($existing !== null) {
-                $existing->update(['avatar' => null]);
-            }
-
-            session(['user_avatar' => null]);
-
-            return redirect('/profile')->with('success', 'Foto de perfil removida com sucesso!');
-        } catch (Throwable $e) {
-            return redirect('/profile')->with('error', 'Erro ao remover foto de perfil: ' . $e->getMessage());
         }
+
+        session(['user_avatar' => null]);
+
+        return redirect('/profile')->with('success', 'Foto de perfil removida com sucesso!');
     }
 
-    public function avatar(int $id)
+    public function avatar(int $id, ProfileService $profiles)
     {
-        $avatarRel = null;
-
         try {
-            $user      = User::find($id);
-            $avatarRel = $user?->avatar;
-        } catch (Throwable) {
-            $avatarRel = null;
-        }
-
-        if (empty($avatarRel) && (int) session('user_id') === $id) {
-            $avatarRel = session('user_avatar');
-        }
-
-        if (empty($avatarRel)) {
+            return $profiles->avatarResponse($id);
+        } catch (ActionException) {
             abort(404);
         }
-
-        $fullPath = storage_path('app/' . $avatarRel);
-        if (! is_file($fullPath)) {
-            abort(404);
-        }
-
-        return response()->file($fullPath, [
-            'Cache-Control' => 'no-cache, must-revalidate',
-        ]);
     }
 }

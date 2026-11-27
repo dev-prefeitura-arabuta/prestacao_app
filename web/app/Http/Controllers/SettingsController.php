@@ -14,23 +14,8 @@ use Throwable;
 
 class SettingsController extends Controller
 {
-    private function ensureAdmin()
-    {
-        $role = session('user_role') ?? session('role') ?? 'user';
-
-        if ($role !== 'admin') {
-            return redirect('/accountability')->with('error', 'Acesso restrito a administradores.');
-        }
-
-        return null;
-    }
-
     public function index(Request $request)
     {
-        if ($redirect = $this->ensureAdmin()) {
-            return $redirect;
-        }
-
         $role       = session('user_role') ?? session('role') ?? 'admin';
         $activeTab  = (string) ($request->query('tab', 'smtp'));
         $smtpConfig = null;
@@ -67,10 +52,6 @@ class SettingsController extends Controller
 
     public function saveGeneral(Request $request)
     {
-        if ($redirect = $this->ensureAdmin()) {
-            return $redirect;
-        }
-
         $validator = Validator::make($request->all(), [
             'app_name'     => 'required|min:2|max:150',
             'company_name' => 'required|min:2|max:200',
@@ -143,10 +124,6 @@ class SettingsController extends Controller
 
     public function removeLogo()
     {
-        if ($redirect = $this->ensureAdmin()) {
-            return $redirect;
-        }
-
         try {
             $existing = GeneralSettings::first();
             if ($existing !== null && ! empty($existing->app_logo)) {
@@ -166,10 +143,6 @@ class SettingsController extends Controller
 
     public function savePdfCover(Request $request)
     {
-        if ($redirect = $this->ensureAdmin()) {
-            return $redirect;
-        }
-
         try {
             $existing = GeneralSettings::first();
             $artPath  = $existing?->pdf_cover_art;
@@ -240,10 +213,6 @@ class SettingsController extends Controller
 
     public function removePdfCoverArt()
     {
-        if ($redirect = $this->ensureAdmin()) {
-            return $redirect;
-        }
-
         try {
             $existing = GeneralSettings::first();
             if ($existing !== null && ! empty($existing->pdf_cover_art)) {
@@ -300,10 +269,6 @@ class SettingsController extends Controller
 
     public function saveOllama(Request $request)
     {
-        if ($redirect = $this->ensureAdmin()) {
-            return $redirect;
-        }
-
         $ollamaService = new OllamaService();
         $ollamaService->saveConfig([
             'provider'           => $request->input('provider'),
@@ -324,10 +289,6 @@ class SettingsController extends Controller
 
     public function saveSmtp(Request $request)
     {
-        if ($redirect = $this->ensureAdmin()) {
-            return $redirect;
-        }
-
         $validator = Validator::make($request->all(), [
             'smtp_host'       => 'required|max:255',
             'smtp_port'       => 'required|max:10',
@@ -389,10 +350,6 @@ class SettingsController extends Controller
 
     public function toggleSmtpStatus()
     {
-        if ($redirect = $this->ensureAdmin()) {
-            return $redirect;
-        }
-
         try {
             $existing = SmtpConfig::first();
             if ($existing === null) {
@@ -414,10 +371,6 @@ class SettingsController extends Controller
 
     public function saveWhatsapp(Request $request)
     {
-        if ($redirect = $this->ensureAdmin()) {
-            return $redirect;
-        }
-
         $validator = Validator::make($request->all(), [
             'api_url'              => 'required|url|max:255',
             'api_key'              => 'nullable|max:500',
@@ -470,10 +423,6 @@ class SettingsController extends Controller
 
     public function toggleWhatsappStatus()
     {
-        if ($redirect = $this->ensureAdmin()) {
-            return $redirect;
-        }
-
         try {
             $existing = WhatsappConfig::first();
             if ($existing === null) {
@@ -495,10 +444,6 @@ class SettingsController extends Controller
 
     public function startWhatsappSession(Request $request)
     {
-        if ($redirect = $this->ensureAdmin()) {
-            return response()->json(['success' => false, 'error' => 'Acesso restrito.'], 403);
-        }
-
         $service = new OpenWaService();
         $result  = $service->ensureAndStartSession(
             $request->input('session_id'),
@@ -510,10 +455,6 @@ class SettingsController extends Controller
 
     public function whatsappQr(Request $request)
     {
-        if ($redirect = $this->ensureAdmin()) {
-            return response()->json(['success' => false, 'error' => 'Acesso restrito.'], 403);
-        }
-
         $service   = new OpenWaService();
         $cfg       = $service->loadConfig();
         $sessionId = trim((string) ($request->query('session_id') ?: ($cfg['session_id'] ?? '')));
@@ -523,10 +464,6 @@ class SettingsController extends Controller
 
     public function testWhatsapp(Request $request)
     {
-        if ($redirect = $this->ensureAdmin()) {
-            return $redirect;
-        }
-
         $phone = trim((string) $request->input('test_phone', ''));
         $msg   = trim((string) $request->input('test_message', ''));
 
@@ -550,10 +487,6 @@ class SettingsController extends Controller
 
     public function notifyOverdueWhatsapp(Request $request)
     {
-        if ($redirect = $this->ensureAdmin()) {
-            return $redirect;
-        }
-
         $force   = $request->boolean('force', false);
         $service = new OverdueWhatsappNotifierService();
         $res     = $service->notifyOverdue(false, $force);

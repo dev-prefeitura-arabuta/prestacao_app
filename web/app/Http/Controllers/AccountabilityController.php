@@ -2,133 +2,59 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\ActionException;
 use App\Models\Accountability;
 use App\Models\AccountabilityAttachment;
 use App\Models\AccountabilityAttachmentAi;
 use App\Models\AccountabilityHistory;
 use App\Models\AccountabilityItemStatus;
 use App\Models\AccountabilitySpreadsheetEntry;
+use App\Models\AdminNotification;
 use App\Models\GeneralSettings;
 use App\Models\User;
 use App\Models\UserAccountabilityPermission;
+use App\Services\AccountabilityListingService;
+use App\Services\AccountabilitySubmissionService;
+use App\Services\AttachmentService;
 use App\Services\ExtractiveAssistantService;
 use App\Services\OllamaService;
 use App\Services\SmtpMailService;
-use App\Services\SpreadsheetAiExtractorService;
+use App\Support\Actor;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Throwable;
 
 class AccountabilityController extends Controller
 {
-    private array $allowedExtensions = ['zip', 'jpg', 'jpeg', 'png', 'pdf'];
-
-    public function index()
+    public function index(AccountabilityListingService $listing)
     {
-        $role          = session('user_role') ?? session('role') ?? 'user';
-        $currentUserId = (int) session('user_id');
+        $actor = Actor::fromSession();
 
         $list                = [];
         $attachmentCounts    = [];
         $filledItemsCounts   = [];
         $progressPercentages = [];
         $totalItemsPerAcc    = [];
-        $allowedItems        = [];
         $rejectedCounts      = [];
-        $totalItemsCount     = count(Accountability::getItems());
+        $allowedItems        = [];
 
         try {
-            $rawList = Accountability::orderBy('id', 'desc')->get()->toArray();
-            $allAtts = AccountabilityAttachment::select('accountability_id', 'item_number')->get()->toArray();
+            $allowedItems = $actor->allowedItems();
 
-            if ($role === 'admin') {
-                $allowedItems = array_keys(Accountability::getItems());
-            } else {
-                $allowedItems = UserAccountabilityPermission::getAllowedItemsForUser($currentUserId);
-            }
+            foreach ($listing->activeFor($actor) as $row) {
+                $accId = (int) $row['accountability']['id'];
 
-            $attsByAccAndItem = [];
-            foreach ($allAtts as $att) {
-                $accId   = (int) $att['accountability_id'];
-                $itemNum = (int) $att['item_number'];
-                if ($role === 'admin' || in_array($itemNum, $allowedItems, true)) {
-                    $attachmentCounts[$accId]            = ($attachmentCounts[$accId] ?? 0) + 1;
-                    $attsByAccAndItem[$accId][$itemNum] = ($attsByAccAndItem[$accId][$itemNum] ?? 0) + 1;
+                $list[]                      = $row['accountability'];
+                $attachmentCounts[$accId]    = $row['attachments_count'];
+                $filledItemsCounts[$accId]   = $row['filled_items'];
+                $progressPercentages[$accId] = $row['progress'];
+                $totalItemsPerAcc[$accId]    = $row['enabled_total'];
+                if ($row['rejected_count'] > 0) {
+                    $rejectedCounts[$accId] = $row['rejected_count'];
                 }
             }
-
-            $allStatusRows = AccountabilityItemStatus::all()->toArray();
-            $statusByAcc   = [];
-            foreach ($allStatusRows as $sRow) {
-                $accId                       = (int) $sRow['accountability_id'];
-                $itemNum                     = (int) $sRow['item_number'];
-                $statusByAcc[$accId][$itemNum] = (string) $sRow['status'];
-            }
-
-            foreach ($rawList as $acc) {
-                $accId = (int) $acc['id'];
-
-                // Prestações finalizadas ficam ocultas na lista ativa e vão apenas para o Histórico Anual
-                if (Accountability::isFinalized($acc, $statusByAcc[$accId] ?? [])) {
-                    continue;
-                }
-
-                $enabledForAcc            = Accountability::getEnabledItemsForAccountability($acc);
-                $enabledItemNums          = array_keys($enabledForAcc);
-                $accTotalItems            = count($enabledItemNums);
-                $totalItemsPerAcc[$accId] = $accTotalItems;
-
-                $filledItems = 0;
-                foreach ($enabledItemNums as $eNum) {
-                    if (! empty($attsByAccAndItem[$accId][$eNum])) {
-                        $filledItems++;
-                    }
-                }
-
-                $userAllowedInAcc            = array_values(array_intersect($allowedItems, $enabledItemNums));
-                $denom                       = $role === 'admin' ? max(1, $accTotalItems) : max(1, count($userAllowedInAcc));
-                $filledItemsCounts[$accId]   = $filledItems;
-                $progressPercentages[$accId] = (int) round(($filledItems / $denom) * 100);
-
-                if ($role === 'admin') {
-                    $list[] = $acc;
-                    continue;
-                }
-
-                // Se a prestação estiver pausada/oculta para manutenção pelo admin, não aparece para usuários comuns
-                if (! empty($acc['is_paused'])) {
-                    continue;
-                }
-
-                if (empty($userAllowedInAcc)) {
-                    continue;
-                }
-
-                $hasSentAny     = false;
-                $hasRejectedAny = false;
-                $hasUnsentFiles = false;
-
-                foreach ($userAllowedInAcc as $itemNum) {
-                    $st       = $statusByAcc[$accId][$itemNum] ?? 'pendente';
-                    $hasFiles = ! empty($attsByAccAndItem[$accId][$itemNum]);
-
-                    if (in_array($st, ['enviado', 'confirmado'], true)) {
-                        $hasSentAny = true;
-                    } elseif ($st === 'rejeitado') {
-                        $hasRejectedAny         = true;
-                        $rejectedCounts[$accId] = ($rejectedCounts[$accId] ?? 0) + 1;
-                    } elseif ($hasFiles && in_array($st, ['pendente', 'prazo_vencido'], true)) {
-                        $hasUnsentFiles = true;
-                    }
-                }
-
-                if ($hasSentAny && ! $hasRejectedAny && ! $hasUnsentFiles) {
-                    continue;
-                }
-
-                $list[] = $acc;
-            }
-        } catch (Throwable) {
+        } catch (Throwable $e) {
+            report($e);
             $list = [];
         }
 
@@ -136,12 +62,12 @@ class AccountabilityController extends Controller
             'userName'            => session('user_name'),
             'username'            => session('username'),
             'userEmail'           => session('user_email'),
-            'userRole'            => $role,
+            'userRole'            => $actor->isAdmin ? 'admin' : 'user',
             'accountabilities'    => $list,
             'attachmentCounts'    => $attachmentCounts,
             'filledItemsCounts'   => $filledItemsCounts,
             'progressPercentages' => $progressPercentages,
-            'totalItemsCount'     => $totalItemsCount,
+            'totalItemsCount'     => count(Accountability::getItems()),
             'totalItemsPerAcc'    => $totalItemsPerAcc,
             'allowedItems'        => $allowedItems,
             'rejectedCounts'      => $rejectedCounts,
@@ -450,54 +376,30 @@ class AccountabilityController extends Controller
         }
     }
 
-    public function submitAccountability(int $id)
+    public function submitAccountability(int $id, AccountabilitySubmissionService $submission)
     {
-        $role          = session('user_role') ?? session('role') ?? 'user';
-        $currentUserId = (int) session('user_id');
+        $actor = Actor::fromSession();
 
-        if ($role === 'admin') {
-            return redirect('/accountability/' . $id)
-                ->with('error', 'Administradores não utilizam o envio interno de prestação. Use o botão "Enviar por E-mail".');
+        try {
+            $ctx = $submission->context($actor, $id);
+        } catch (ActionException $e) {
+            return redirect($e->status() === 404 ? '/accountability' : '/accountability/' . $id)->with('error', $e->getMessage());
         }
 
-        $allowedItems = UserAccountabilityPermission::getAllowedItemsForUser($currentUserId);
-
-        if (empty($allowedItems)) {
-            return redirect('/accountability')->with('error', 'Você não possui itens liberados nesta prestação.');
-        }
-
-        $atts = AccountabilityAttachment::where('accountability_id', $id)
-            ->whereIn('item_number', $allowedItems)
-            ->get()
-            ->toArray();
-
-        if (empty($atts)) {
+        // Na Web, envia os itens que já possuem anexos
+        if (empty($ctx['with_files'])) {
             return redirect('/accountability/' . $id)->with('error', 'Anexe pelo menos um documento antes de clicar em Enviar.');
         }
 
-        $itemsWithFiles = array_values(array_unique(array_map(static fn ($a) => (int) $a['item_number'], $atts)));
-
         try {
-            $sentCount = 0;
-
-            foreach ($itemsWithFiles as $itemNum) {
-                $existing = AccountabilityItemStatus::where('accountability_id', $id)
-                    ->where('item_number', $itemNum)
-                    ->first();
-
-                if ($existing === null || in_array($existing->status, ['pendente', 'rejeitado', 'prazo_vencido'], true)) {
-                    AccountabilityItemStatus::setStatus($id, $itemNum, 'enviado', $currentUserId);
-                    $sentCount++;
-                }
-            }
-
-            $this->logHistory($id, "Enviou documentos da prestação de contas ({$sentCount} item(ns)) para análise");
-
-            return redirect('/accountability')
-                ->with('success', 'Prestação de contas enviada com sucesso para avaliação do Administrador!');
+            $submission->submit($actor, $ctx['accountability'], $ctx['with_files'], $ctx['enabled']);
         } catch (Throwable $e) {
-            return redirect('/accountability/' . $id)->with('error', 'Erro ao enviar: ' . $e->getMessage());
+            report($e);
+            return redirect('/accountability/' . $id)->with('error', 'Erro ao enviar a prestação. Tente novamente.');
         }
+
+        return redirect('/accountability')
+            ->with('success', 'Prestação de contas enviada com sucesso para avaliação do Administrador!');
     }
 
     public function sendEmail(Request $request, int $id)
@@ -628,6 +530,19 @@ class AccountabilityController extends Controller
             AccountabilityItemStatus::setStatus($id, $itemNumber, 'enviado', $currentUserId);
             $this->logHistory($id, "Enviou o Item {$itemNumber} com {$attCount} anexo(s) para análise");
 
+            if ($role !== 'admin') {
+                $accObj    = Accountability::find($id);
+                $accTitle  = (string) ($accObj?->title ?? "Prestação #{$id}");
+                $actorName = (string) (session('user_name') ?? 'Usuário');
+                $numPad    = str_pad((string) $itemNumber, 2, '0', STR_PAD_LEFT);
+                AdminNotification::notifyAdmins(
+                    "Item {$numPad} enviado",
+                    "{$actorName} enviou o Item {$numPad} ({$attCount} anexo(s)) na prestação \"{$accTitle}\".",
+                    $id,
+                    $actorName
+                );
+            }
+
             return redirect('/accountability')->with('success', 'Documentos enviados com sucesso para avaliação!');
         } catch (Throwable $e) {
             return redirect('/accountability/' . $id . '#modal-item-' . $itemNumber)->with('error', 'Erro ao enviar item: ' . $e->getMessage());
@@ -721,241 +636,92 @@ class AccountabilityController extends Controller
         }
     }
 
-    public function upload(Request $request, int $id, int $itemNumber)
+    public function upload(Request $request, int $id, int $itemNumber, AttachmentService $attachments)
     {
-        $role          = session('user_role') ?? session('role') ?? 'user';
-        $currentUserId = (int) session('user_id');
-        $allItems      = Accountability::getItems();
+        $actor    = Actor::fromSession();
+        $backUrl  = '/accountability/' . $id . '#modal-item-' . $itemNumber;
 
-        if (! isset($allItems[$itemNumber])) {
-            return redirect('/accountability/' . $id)->with('error', 'Campo de anexo inválido.');
-        }
-
-        if ($role !== 'admin') {
-            $allowedItems = UserAccountabilityPermission::getAllowedItemsForUser($currentUserId);
-            if (! in_array($itemNumber, $allowedItems, true)) {
-                return redirect('/accountability/' . $id)->with('error', 'Você não possui permissão para anexar arquivos no Item ' . $itemNumber . '.');
-            }
+        try {
+            $attachments->assertCanUpload($actor, $id, $itemNumber);
+        } catch (ActionException $e) {
+            return redirect($e->status() === 404 ? '/accountability' : '/accountability/' . $id)->with('error', $e->getMessage());
         }
 
         $files = $request->file('attachments');
         if (empty($files)) {
-            return redirect('/accountability/' . $id . '#modal-item-' . $itemNumber)->with('error', 'Selecione pelo menos um arquivo para anexar.');
+            return redirect($backUrl)->with('error', 'Selecione pelo menos um arquivo para anexar.');
         }
 
-        $targetDir = storage_path('app/uploads/accountability/' . $id . '/item_' . $itemNumber);
-        if (! is_dir($targetDir)) {
-            mkdir($targetDir, 0775, true);
-        }
+        $uploadedCount = 0;
+        $rejected      = [];
 
-        $uploadedCount      = 0;
-        $invalidFiles       = [];
-        $createdAttachments = [];
-        $now                = now()->format('Y-m-d H:i:s');
-
-        foreach ($files as $file) {
-            if (! $file->isValid()) {
-                continue;
-            }
-
-            $originalName = $file->getClientOriginalName();
-            $ext          = strtolower((string) $file->getClientOriginalExtension());
-
-            if (! in_array($ext, $this->allowedExtensions, true)) {
-                $invalidFiles[] = $originalName;
-                continue;
-            }
-
-            $size    = (int) $file->getSize();
-            $newName = time() . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
-            $file->move($targetDir, $newName);
-
-            $attModel = AccountabilityAttachment::create([
-                'accountability_id' => $id,
-                'item_number'       => $itemNumber,
-                'user_id'           => $currentUserId,
-                'original_name'     => $originalName,
-                'file_name'         => $newName,
-                'file_path'         => 'uploads/accountability/' . $id . '/item_' . $itemNumber . '/' . $newName,
-                'file_ext'          => $ext,
-                'file_size'         => $size,
-                'created_at'        => $now,
-            ]);
-
-            $createdAttachments[] = $attModel->toArray();
-            $uploadedCount++;
-        }
-
-        $autoSheetInserted = 0;
-        if (! empty($createdAttachments)) {
+        foreach ((array) $files as $file) {
             try {
-                $accRow    = Accountability::find($id);
-                $extractor = new SpreadsheetAiExtractorService();
-                $extRes    = $extractor->extractEntries($accRow ? $accRow->toArray() : ['id' => $id, 'title' => "Prestação #{$id}"], $createdAttachments);
-
-                if (! empty($extRes['success']) && ! empty($extRes['entries'])) {
-                    foreach ($extRes['entries'] as $entry) {
-                        AccountabilitySpreadsheetEntry::create([
-                            'accountability_id' => $id,
-                            'item_number'       => $entry['item_number'] ?: $itemNumber,
-                            'attachment_id'     => $entry['attachment_id'] ?? (count($createdAttachments) === 1 ? (int) ($createdAttachments[0]['id'] ?? 0) : null),
-                            'entry_date'        => $entry['entry_date'],
-                            'document_number'   => $entry['document_number'],
-                            'supplier_name'     => $entry['supplier_name'],
-                            'cnpj_cpf'          => $entry['cnpj_cpf'],
-                            'description'       => $entry['description'],
-                            'entry_type'        => $entry['entry_type'],
-                            'amount'            => $entry['amount'],
-                            'notes'             => $entry['notes'],
-                            'created_by'        => $currentUserId,
-                        ]);
-                        $autoSheetInserted++;
-                    }
-                }
-            } catch (Throwable) {
-                // Não bloqueia o upload caso a IA esteja indisponível
+                $attachments->store($actor, $id, $itemNumber, $file);
+                $uploadedCount++;
+            } catch (ActionException $e) {
+                $rejected[] = $file->getClientOriginalName() . ' (' . $e->getMessage() . ')';
             }
         }
 
         if ($uploadedCount > 0) {
-            $this->logHistory($id, "Anexou {$uploadedCount} arquivo(s) no Item {$itemNumber}");
+            AccountabilityHistory::log($id, $actor->id, "Anexou {$uploadedCount} arquivo(s) no Item {$itemNumber}");
         }
 
-        if (! empty($invalidFiles)) {
-            $msg = 'Alguns arquivos foram recusados (apenas ZIP, JPG, JPEG, PNG e PDF são permitidos): ' . implode(', ', $invalidFiles);
-            return redirect('/accountability/' . $id . '#modal-item-' . $itemNumber)->with('error', $msg);
+        if (! empty($rejected)) {
+            return redirect($backUrl)->with('error', 'Alguns arquivos foram recusados: ' . implode(', ', $rejected));
         }
 
         if ($uploadedCount === 0) {
-            return redirect('/accountability/' . $id . '#modal-item-' . $itemNumber)->with('error', 'Nenhum arquivo válido selecionado.');
+            return redirect($backUrl)->with('error', 'Nenhum arquivo válido selecionado.');
         }
 
-        $extraAiMsg = $autoSheetInserted > 0
-            ? " ✨ {$autoSheetInserted} lançamento(s) extraído(s) automaticamente pela IA para a Planilha!"
-            : '';
-
-        return redirect('/accountability/' . $id . '#modal-item-' . $itemNumber)->with('success', "{$uploadedCount} arquivo(s) anexado(s) no Item {$itemNumber}!{$extraAiMsg}");
+        return redirect($backUrl)->with('success', "{$uploadedCount} arquivo(s) anexado(s) no Item {$itemNumber}!");
     }
 
-    public function previewAttachment(int $attachmentId)
+    public function previewAttachment(int $attachmentId, AttachmentService $attachments)
     {
-        $role          = session('user_role') ?? session('role') ?? 'user';
-        $currentUserId = (int) session('user_id');
-
-        $attachment = AccountabilityAttachment::find($attachmentId);
-        if ($attachment === null) {
-            abort(404, 'Anexo não encontrado.');
+        try {
+            return $attachments->inlineResponse($attachments->findViewable(Actor::fromSession(), $attachmentId));
+        } catch (ActionException $e) {
+            abort($e->status(), $e->getMessage());
         }
-
-        $itemNumber = (int) $attachment->item_number;
-        if ($role !== 'admin') {
-            $allowedItems = UserAccountabilityPermission::getAllowedItemsForUser($currentUserId);
-            if (! in_array($itemNumber, $allowedItems, true)) {
-                abort(403, 'Sem permissão.');
-            }
-        }
-
-        $fullPath = storage_path('app/' . $attachment->file_path);
-        if (! is_file($fullPath)) {
-            abort(404, 'Arquivo não encontrado.');
-        }
-
-        $ext      = strtolower((string) ($attachment->file_ext ?? ''));
-        $mimeMap  = [
-            'pdf'  => 'application/pdf',
-            'jpg'  => 'image/jpeg',
-            'jpeg' => 'image/jpeg',
-            'png'  => 'image/png',
-            'zip'  => 'application/zip',
-        ];
-        $mimeType = $mimeMap[$ext] ?? (mime_content_type($fullPath) ?: 'application/octet-stream');
-        $safeName = str_replace('"', '', (string) $attachment->original_name);
-
-        return response()->file($fullPath, [
-            'Content-Type'        => $mimeType,
-            'Content-Disposition' => 'inline; filename="' . $safeName . '"',
-        ]);
     }
 
-    public function downloadAttachment(int $attachmentId)
+    public function downloadAttachment(int $attachmentId, AttachmentService $attachments)
     {
-        $role          = session('user_role') ?? session('role') ?? 'user';
-        $currentUserId = (int) session('user_id');
-
-        $attachment = AccountabilityAttachment::find($attachmentId);
-        if ($attachment === null) {
-            return back()->with('error', 'Anexo não encontrado.');
+        try {
+            $att = $attachments->findViewable(Actor::fromSession(), $attachmentId);
+        } catch (ActionException $e) {
+            return back()->with('error', $e->getMessage());
         }
 
-        $itemNumber = (int) $attachment->item_number;
-        if ($role !== 'admin') {
-            $allowedItems = UserAccountabilityPermission::getAllowedItemsForUser($currentUserId);
-            if (! in_array($itemNumber, $allowedItems, true)) {
-                return back()->with('error', 'Você não tem permissão para acessar este anexo.');
-            }
-        }
-
-        $fullPath = storage_path('app/' . $attachment->file_path);
+        $fullPath = storage_path('app/' . $att->file_path);
         if (! is_file($fullPath)) {
             return back()->with('error', 'Arquivo físico não encontrado no servidor.');
         }
 
-        return response()->download($fullPath, $attachment->original_name);
+        return response()->download($fullPath, $att->original_name);
     }
 
-    public function deleteAttachment(int $attachmentId)
+    public function deleteAttachment(int $attachmentId, AttachmentService $attachments)
     {
-        $role          = session('user_role') ?? session('role') ?? 'user';
-        $currentUserId = (int) session('user_id');
-
-        $attachment = AccountabilityAttachment::find($attachmentId);
-        if ($attachment === null) {
+        $att = AccountabilityAttachment::find($attachmentId);
+        if ($att === null) {
             return back()->with('error', 'Anexo não encontrado.');
         }
+        $backUrl = '/accountability/' . (int) $att->accountability_id . '#modal-item-' . (int) $att->item_number;
 
-        $accId      = (int) $attachment->accountability_id;
-        $itemNumber = (int) $attachment->item_number;
-
-        if ($role !== 'admin' && (int) $attachment->user_id !== $currentUserId) {
-            return redirect('/accountability/' . $accId . '#modal-item-' . $itemNumber)->with('error', 'Você só pode excluir anexos enviados por você.');
-        }
-
-        $fullPath = storage_path('app/' . $attachment->file_path);
-        if (is_file($fullPath)) {
-            @unlink($fullPath);
-        }
-
-        $origName = $attachment->original_name;
-        $attachment->delete();
-
-        // Se não restar nenhum anexo neste item, volta o status automaticamente para 'pendente'
-        $remainingCount = AccountabilityAttachment::where('accountability_id', $accId)
-            ->where('item_number', $itemNumber)
-            ->count();
-        if ($remainingCount === 0) {
-            AccountabilityItemStatus::setStatus($accId, $itemNumber, 'pendente', $currentUserId, null);
-        }
-
-        // Remove da planilha qualquer lançamento vinculado a este anexo excluído
         try {
-            AccountabilitySpreadsheetEntry::where('accountability_id', $accId)
-                ->where(static function ($q) use ($attachmentId, $itemNumber, $origName) {
-                    $q->where('attachment_id', $attachmentId);
-                    if ($origName !== '') {
-                        $q->orWhere(static function ($q2) use ($itemNumber, $origName) {
-                            $q2->where('item_number', $itemNumber)
-                               ->where('notes', 'like', '%' . $origName . '%');
-                        });
-                    }
-                })
-                ->delete();
-        } catch (Throwable) {
-            // Não impede exclusão do anexo
+            $attachments->delete(Actor::fromSession(), $attachmentId);
+        } catch (ActionException $e) {
+            return redirect($backUrl)->with('error', $e->getMessage());
+        } catch (Throwable $e) {
+            report($e);
+            return redirect($backUrl)->with('error', 'Erro ao remover o anexo.');
         }
 
-        $this->logHistory($accId, "Removeu anexo '{$origName}' do Item {$itemNumber}");
-
-        return redirect('/accountability/' . $accId . '#modal-item-' . $itemNumber)->with('success', 'Anexo removido com sucesso!');
+        return redirect($backUrl)->with('success', 'Anexo removido com sucesso!');
     }
 
     public function analyzeAttachment(int $attachmentId)
@@ -989,8 +755,15 @@ class AccountabilityController extends Controller
         $fullPath  = storage_path('app/' . $attachment->file_path);
         $ext       = strtolower((string) ($attachment->file_ext ?? ''));
 
+        /* Recurso de IA temporariamente comentado
         $ollama = new OllamaService();
         $result = $ollama->analyzeAttachment($fullPath, $itemTitle, (string) $attachment->original_name, $ext);
+        */
+        return response()->json([
+            'success'   => false,
+            'error'     => 'Recurso de análise por IA temporariamente desativado.',
+            'csrf_hash' => csrf_token(),
+        ], 503);
 
         if (! empty($result['success']) && ! empty($result['structured']) && is_array($result['structured'])) {
             try {
@@ -1152,7 +925,14 @@ class AccountabilityController extends Controller
             $existing[(int) $row['attachment_id']] = $row;
         }
 
+        /* Recurso de IA temporariamente comentado
         $ollama    = new OllamaService();
+        */
+        return response()->json([
+            'success'   => false,
+            'error'     => 'Recurso de análise em lote por IA temporariamente desativado.',
+            'csrf_hash' => csrf_token(),
+        ], 503);
         $processed = 0;
         $errors    = [];
 
@@ -1375,14 +1155,6 @@ class AccountabilityController extends Controller
 
     private function logHistory(int $accountabilityId, string $statusText): void
     {
-        try {
-            AccountabilityHistory::create([
-                'accountability_id' => $accountabilityId,
-                'user_id'           => (int) session('user_id'),
-                'status'            => mb_substr($statusText, 0, 250),
-            ]);
-        } catch (Throwable) {
-            // Ignora falha de log
-        }
+        AccountabilityHistory::log($accountabilityId, (int) session('user_id'), $statusText);
     }
 }

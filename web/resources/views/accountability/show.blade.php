@@ -1955,7 +1955,7 @@
                                                     class="file-input js-file-input"
                                                     data-preview-target="preview-strip-<?= esc((string) $num) ?>"
                                                     multiple
-                                                    accept=".zip,.jpg,.jpeg,.png,.pdf"
+                                                    accept=".zip,.jpg,.jpeg,.png,.webp,.pdf"
                                                     required>
                                                 <span class="allowed-formats">ZIP, JPG, JPEG, PNG, PDF (múltiplos)</span>
                                                 <button type="submit" class="btn-upload">

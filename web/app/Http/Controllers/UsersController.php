@@ -11,23 +11,8 @@ use Throwable;
 
 class UsersController extends Controller
 {
-    private function ensureAdmin()
-    {
-        $role = session('user_role') ?? session('role') ?? 'user';
-
-        if ($role !== 'admin') {
-            return redirect('/accountability')->with('error', 'Acesso restrito a administradores.');
-        }
-
-        return null;
-    }
-
     public function index()
     {
-        if ($redirect = $this->ensureAdmin()) {
-            return $redirect;
-        }
-
         $role            = session('user_role') ?? session('role') ?? 'admin';
         $users           = [];
         $userPermissions = [];
@@ -55,10 +40,6 @@ class UsersController extends Controller
 
     public function create()
     {
-        if ($redirect = $this->ensureAdmin()) {
-            return $redirect;
-        }
-
         return view('users.form', [
             'userName'            => session('user_name'),
             'username'            => session('username'),
@@ -73,10 +54,6 @@ class UsersController extends Controller
 
     public function store(Request $request)
     {
-        if ($redirect = $this->ensureAdmin()) {
-            return $redirect;
-        }
-
         $validator = Validator::make($request->all(), [
             'name'     => 'required|min:3|max:100',
             'email'    => 'required|email|max:100|unique:users,email',
@@ -122,10 +99,6 @@ class UsersController extends Controller
 
     public function edit(int $id)
     {
-        if ($redirect = $this->ensureAdmin()) {
-            return $redirect;
-        }
-
         try {
             $user = User::find($id);
             if ($user === null) {
@@ -150,10 +123,6 @@ class UsersController extends Controller
 
     public function update(Request $request, int $id)
     {
-        if ($redirect = $this->ensureAdmin()) {
-            return $redirect;
-        }
-
         $validator = Validator::make($request->all(), [
             'name'     => 'required|min:3|max:100',
             'email'    => "required|email|max:100|unique:users,email,{$id}",
@@ -217,10 +186,6 @@ class UsersController extends Controller
 
     public function delete(int $id)
     {
-        if ($redirect = $this->ensureAdmin()) {
-            return $redirect;
-        }
-
         if ((int) session('user_id') === $id) {
             return redirect('/users')->with('error', 'Você não pode excluir sua própria conta enquanto estiver logado.');
         }
@@ -243,10 +208,6 @@ class UsersController extends Controller
 
     public function updateRole(Request $request, int $id)
     {
-        if ($redirect = $this->ensureAdmin()) {
-            return $redirect;
-        }
-
         $newRole = (string) $request->input('role');
         if (! in_array($newRole, ['admin', 'user'], true)) {
             return back()->with('error', 'Permissão inválida.');

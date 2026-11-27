@@ -222,13 +222,19 @@ $logoUrl     = site_url('app-logo') . (! empty($genSettings['app_logo']) ? '?v='
 
         <div class="login-card">
             <div class="login-header">
+                <?php if (! empty($quickLogin)): ?>
                 <h1>Login Rápido</h1>
                 <p>Selecione o usuário abaixo para acessar o sistema</p>
+                <?php else: ?>
+                <h1>Acessar o Sistema</h1>
+                <p>Informe seu e-mail e senha para continuar</p>
+                <?php endif; ?>
             </div>
 
             <form action="<?= site_url('login') ?>" method="post" id="quickLoginForm">
                 <?= csrf_field() ?>
 
+                <?php if (! empty($quickLogin)): ?>
                 <div class="form-group">
                     <label for="login">Selecionar Usuário</label>
                     <select id="login" name="login" class="form-control" required autofocus>
@@ -246,6 +252,12 @@ $logoUrl     = site_url('app-logo') . (! empty($genSettings['app_logo']) ? '?v='
                         <?php endforeach; ?>
                     </select>
                 </div>
+                <?php else: ?>
+                <div class="form-group">
+                    <label for="login">E-mail</label>
+                    <input type="email" id="login" name="login" class="form-control" value="<?= esc((string) old('login', '')) ?>" placeholder="seu@email.com" autocomplete="username" required autofocus>
+                </div>
+                <?php endif; ?>
 
                 <div class="form-group">
                     <label for="password">Senha</label>
@@ -254,8 +266,14 @@ $logoUrl     = site_url('app-logo') . (! empty($genSettings['app_logo']) ? '?v='
                         id="password"
                         name="password"
                         class="form-control"
+                        autocomplete="current-password"
+                        required
+                        <?php if (! empty($quickLogin)): ?>
                         placeholder="Preenchida automaticamente no login rápido"
                         value="123456"
+                        <?php else: ?>
+                        placeholder="Sua senha"
+                        <?php endif; ?>
                     >
                 </div>
 
@@ -280,13 +298,16 @@ $logoUrl     = site_url('app-logo') . (! empty($genSettings['app_logo']) ? '?v='
                 </a>
             </div>
 
+            <?php if (! empty($quickLogin)): ?>
             <div class="quick-hint">
                 Modo de acesso rápido ativo — senha padrão <code>123456</code>
             </div>
+            <?php endif; ?>
         </div>
     </div>
     </main>
 
+    <?php if (! empty($quickLogin)): ?>
     <script>
         const selectEl = document.getElementById('login');
         const passwordEl = document.getElementById('password');
@@ -299,6 +320,7 @@ $logoUrl     = site_url('app-logo') . (! empty($genSettings['app_logo']) ? '?v='
             });
         }
     </script>
+    <?php endif; ?>
 </body>
 </html>
 

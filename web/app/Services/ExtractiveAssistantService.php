@@ -144,6 +144,7 @@ class ExtractiveAssistantService
         $aiError      = null;
         $tokensUsed   = 0;
 
+        /* Recurso de IA externa (Groq/Gemini) temporariamente comentado
         $aiIntents = ['summary', 'item', 'search', 'validations', 'values', 'entities'];
         if (in_array($intent, $aiIntents, true) && ! empty($analyzedDocs)) {
             $aiService = new GeminiSummaryService();
@@ -161,6 +162,7 @@ class ExtractiveAssistantService
                 }
             }
         }
+        */
 
         $elapsedMs    = (int) round((microtime(true) - $startedAt) * 1000);
         $ocrDocsCount = count(array_filter($analyzedDocs, static fn ($d) => ! empty($d['used_ocr'])));
