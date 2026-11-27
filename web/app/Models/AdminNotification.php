@@ -32,7 +32,7 @@ class AdminNotification extends Model
         ?string $actorName = null
     ): void {
         try {
-            $admins = User::where('role', 'admin')->get();
+            $admins = User::businessAdmins()->get();
             $now    = now()->format('Y-m-d H:i:s');
 
             foreach ($admins as $adm) {

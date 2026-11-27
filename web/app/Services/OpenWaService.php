@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\WhatsappConfig;
+use App\Support\Phone;
 use Illuminate\Support\Facades\Http;
 use Throwable;
 
@@ -348,16 +349,10 @@ class OpenWaService
             return $phone;
         }
 
-        $digits = preg_replace('/\D/', '', $phone) ?? '';
-        if (strlen($digits) < 8) {
-            return '';
-        }
+        // Antes, um número de 11 dígitos com DDD 55 (ex: 55 99999-9999) não recebia o DDI
+        // porque "já começava com 55". Phone::toInternational trata DDD e DDI separadamente.
+        $digits = Phone::toInternational($phone, $countryCode);
 
-        $cc = preg_replace('/\D/', '', $countryCode) ?: '55';
-        if (strlen($digits) <= 11 && ! str_starts_with($digits, $cc)) {
-            $digits = $cc . $digits;
-        }
-
-        return $digits . '@c.us';
+        return $digits === null ? '' : $digits . '@c.us';
     }
 }

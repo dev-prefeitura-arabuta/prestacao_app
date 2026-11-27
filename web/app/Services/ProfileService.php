@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Exceptions\ActionException;
 use App\Models\User;
+use App\Rules\BrazilianPhone;
+use App\Support\Phone;
 use App\Support\UploadedFiles;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Validator;
@@ -31,7 +33,7 @@ class ProfileService
         Validator::make($input, [
             'name'             => 'required|min:3|max:100',
             'email'            => "required|email|max:100|unique:users,email,{$userId}",
-            'whatsapp'         => 'nullable|max:30',
+            'whatsapp'         => ['nullable', 'max:30', new BrazilianPhone()],
             'new_password'     => 'nullable|min:6',
             'confirm_password' => 'same:new_password',
         ], [
@@ -54,7 +56,7 @@ class ProfileService
         $data     = [
             'name'     => trim((string) $input['name']),
             'email'    => strtolower(trim((string) $input['email'])),
-            'whatsapp' => $whatsapp !== '' ? $whatsapp : null,
+            'whatsapp' => Phone::format($whatsapp),
             'avatar'   => $avatarPath,
         ];
 

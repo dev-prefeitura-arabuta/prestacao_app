@@ -250,7 +250,8 @@
 </head>
 <body>
     <?php
-    $currentTab     = $activeTab ?? 'smtp';
+    $isDeveloper    = (bool) ($isDeveloper ?? false);
+    $currentTab     = $activeTab ?? ($isDeveloper ? 'smtp' : 'general');
     $smtpHost       = old('smtp_host', $smtpConfig['smtp_host'] ?? '');
     $smtpPort       = old('smtp_port', $smtpConfig['smtp_port'] ?? '587');
     $smtpEncryption = old('smtp_encryption', $smtpConfig['smtp_encryption'] ?? 'STARTTLS');
@@ -297,16 +298,20 @@
             <main class="container">
                 <div class="page-header">
                     <h1>Configurações</h1>
-                    <p>Gerencie os parâmetros de envio de e-mail (SMTP) e preferências do sistema.</p>
+                    <p><?= $isDeveloper
+                        ? 'Gerencie os parâmetros de envio de e-mail (SMTP), WhatsApp e preferências do sistema.'
+                        : 'Gerencie a identidade do sistema e a capa do PDF. As integrações de e-mail e WhatsApp são mantidas pelo desenvolvedor.' ?></p>
                 </div>
 
                 <div class="tabs-nav">
+                    <?php if ($isDeveloper): ?>
                     <a href="<?= site_url('settings?tab=smtp') ?>" class="tab-btn <?= $currentTab === 'smtp' ? 'active' : '' ?>">
                         Servidor SMTP (E-mail)
                     </a>
                     <a href="<?= site_url('settings?tab=whatsapp') ?>" class="tab-btn <?= $currentTab === 'whatsapp' ? 'active' : '' ?>">
                         WhatsApp (OpenWA)
                     </a>
+                    <?php endif; ?>
                     <?php /* Aba de IA temporariamente desabilitada na interface
                     <a href="<?= site_url('settings?tab=ollama') ?>" class="tab-btn <?= $currentTab === 'ollama' ? 'active' : '' ?>">
                         Inteligência Artificial (Ollama / Qwen-VL)
@@ -320,6 +325,7 @@
                     </a>
                 </div>
 
+                <?php if ($isDeveloper): /* Abas técnicas: SMTP e IA (somente desenvolvedor) */ ?>
                 <!-- Aba: SMTP Settings -->
                 <div class="tab-pane <?= $currentTab === 'smtp' ? 'active' : '' ?>">
                     <div class="smtp-card">
@@ -689,6 +695,8 @@
                     </div>
                 </div>
 
+                <?php endif; ?>
+
                 <!-- Aba: Geral -->
                 <?php
                 $gAppName     = old('app_name', $generalConfig['app_name'] ?? 'Sistema Patrimonial');
@@ -976,6 +984,7 @@
                     </div>
                 </div>
 
+                <?php if ($isDeveloper): /* Aba técnica: WhatsApp (somente desenvolvedor) */ ?>
                 <!-- Aba: WhatsApp (OpenWA Gateway) -->
                 <div class="tab-pane <?= $currentTab === 'whatsapp' ? 'active' : '' ?>">
                     <?php if (session('success') && $currentTab === 'whatsapp'): ?>
@@ -1228,6 +1237,7 @@
                         </div>
                     </div>
                 </div>
+                <?php endif; ?>
             </main>
         </div>
     </div>

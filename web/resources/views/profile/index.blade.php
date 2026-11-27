@@ -455,7 +455,10 @@
                                         id="whatsapp"
                                         name="whatsapp"
                                         class="form-control"
-                                        placeholder="Ex: (49) 99999-9999 ou 5549999999999"
+                                        inputmode="tel"
+                                        maxlength="16"
+                                        data-phone-mask
+                                        placeholder="Ex: (49) 99999-9999"
                                         value="<?= esc((string) $currentWhatsapp) ?>">
                                 </div>
 
@@ -543,6 +546,7 @@
             }
         })();
     </script>
+    <?= view('partials.phone_mask')->render() ?>
 </body>
 
 </html>

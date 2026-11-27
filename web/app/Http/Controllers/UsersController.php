@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\Accountability;
 use App\Models\User;
 use App\Models\UserAccountabilityPermission;
+use App\Rules\BrazilianPhone;
+use App\Support\Phone;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Throwable;
@@ -18,7 +20,7 @@ class UsersController extends Controller
         $userPermissions = [];
 
         try {
-            $users    = User::orderBy('id', 'asc')->get()->toArray();
+            $users    = User::visibleTo($this->viewerIsDeveloper())->orderBy('id', 'asc')->get()->toArray();
             $allPerms = UserAccountabilityPermission::orderBy('item_number', 'asc')->get()->toArray();
             foreach ($allPerms as $p) {
                 $uid                     = (int) $p['user_id'];
@@ -57,7 +59,7 @@ class UsersController extends Controller
         $validator = Validator::make($request->all(), [
             'name'     => 'required|min:3|max:100',
             'email'    => 'required|email|max:100|unique:users,email',
-            'whatsapp' => 'nullable|max:30',
+            'whatsapp' => ['nullable', 'max:30', new BrazilianPhone()],
             'password' => 'required|min:6',
             'role'     => 'required|in:admin,user',
         ], [
@@ -82,8 +84,8 @@ class UsersController extends Controller
 
             $user = User::create([
                 'name'            => trim((string) $request->input('name')),
-                'email'           => trim((string) $request->input('email')),
-                'whatsapp'        => $whatsapp !== '' ? $whatsapp : null,
+                'email'           => strtolower(trim((string) $request->input('email'))),
+                'whatsapp'        => Phone::format($whatsapp),
                 'password_hashed' => password_hash((string) $request->input('password'), PASSWORD_DEFAULT),
                 'role'            => (string) $request->input('role'),
             ]);
@@ -100,7 +102,7 @@ class UsersController extends Controller
     public function edit(int $id)
     {
         try {
-            $user = User::find($id);
+            $user = $this->findManageable($id);
             if ($user === null) {
                 return redirect('/users')->with('error', 'Usuário não encontrado.');
             }
@@ -126,7 +128,7 @@ class UsersController extends Controller
         $validator = Validator::make($request->all(), [
             'name'     => 'required|min:3|max:100',
             'email'    => "required|email|max:100|unique:users,email,{$id}",
-            'whatsapp' => 'nullable|max:30',
+            'whatsapp' => ['nullable', 'max:30', new BrazilianPhone()],
             'role'     => 'required|in:admin,user',
             'password' => 'nullable|min:6',
         ], [
@@ -145,7 +147,7 @@ class UsersController extends Controller
         }
 
         try {
-            $user = User::find($id);
+            $user = $this->findManageable($id);
             if ($user === null) {
                 return redirect('/users')->with('error', 'Usuário não encontrado.');
             }
@@ -154,10 +156,15 @@ class UsersController extends Controller
 
             $data = [
                 'name'     => trim((string) $request->input('name')),
-                'email'    => trim((string) $request->input('email')),
-                'whatsapp' => $whatsapp !== '' ? $whatsapp : null,
+                'email'    => strtolower(trim((string) $request->input('email'))),
+                'whatsapp' => Phone::format($whatsapp),
                 'role'     => (string) $request->input('role'),
             ];
+
+            // Conta de desenvolvedor é sempre administrador
+            if ($user->isDeveloper()) {
+                $data['role'] = 'admin';
+            }
 
             $newPassword = (string) $request->input('password');
             if ($newPassword !== '') {
@@ -191,7 +198,7 @@ class UsersController extends Controller
         }
 
         try {
-            $user = User::find($id);
+            $user = $this->findManageable($id);
             if ($user === null) {
                 return redirect('/users')->with('error', 'Usuário não encontrado.');
             }
@@ -214,9 +221,13 @@ class UsersController extends Controller
         }
 
         try {
-            $user = User::find($id);
+            $user = $this->findManageable($id);
             if ($user === null) {
                 return back()->with('error', 'Usuário não encontrado.');
+            }
+
+            if ($user->isDeveloper() && $newRole !== 'admin') {
+                return back()->with('error', 'A conta de desenvolvedor precisa ser administrador.');
             }
 
             $user->update(['role' => $newRole]);
@@ -225,5 +236,19 @@ class UsersController extends Controller
         } catch (Throwable) {
             return back()->with('error', 'Não foi possível atualizar a permissão no banco de dados.');
         }
+    }
+
+    private function viewerIsDeveloper(): bool
+    {
+        return (bool) session('is_developer');
+    }
+
+    /**
+     * Busca um usuário que o administrador logado pode gerenciar.
+     * Contas de desenvolvedor só são visíveis/editáveis por outro desenvolvedor.
+     */
+    private function findManageable(int $id): ?User
+    {
+        return User::visibleTo($this->viewerIsDeveloper())->find($id);
     }
 }

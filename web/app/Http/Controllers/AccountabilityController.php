@@ -101,13 +101,14 @@ class AccountabilityController extends Controller
 
         $validator = Validator::make($request->all(), [
             'title'       => 'required|min:3|max:100',
-            'description' => 'nullable',
-            'deadline'    => 'nullable|date',
+            'description' => 'nullable|max:5000',
+            'deadline'    => 'nullable|date_format:Y-m-d|after_or_equal:2000-01-01|before_or_equal:2100-12-31',
             'status'      => 'required|in:aberta,em_analise,concluida',
         ], [
             'title.required' => 'Informe o título da prestação de contas.',
             'title.min'      => 'O título deve ter pelo menos 3 caracteres.',
-            'deadline.date'  => 'Informe uma data limite válida.',
+            'deadline.*'     => 'Informe uma data limite válida (entre 2000 e 2100).',
+            'description.max' => 'A descrição deve ter no máximo 5000 caracteres.',
         ]);
 
         if ($validator->fails()) {
@@ -190,13 +191,14 @@ class AccountabilityController extends Controller
 
         $validator = Validator::make($request->all(), [
             'title'       => 'required|min:3|max:100',
-            'description' => 'nullable',
-            'deadline'    => 'nullable|date',
+            'description' => 'nullable|max:5000',
+            'deadline'    => 'nullable|date_format:Y-m-d|after_or_equal:2000-01-01|before_or_equal:2100-12-31',
             'status'      => 'required|in:aberta,em_analise,concluida',
         ], [
             'title.required' => 'Informe o título da prestação de contas.',
             'title.min'      => 'O título deve ter pelo menos 3 caracteres.',
-            'deadline.date'  => 'Informe uma data limite válida.',
+            'deadline.*'     => 'Informe uma data limite válida (entre 2000 e 2100).',
+            'description.max' => 'A descrição deve ter no máximo 5000 caracteres.',
         ]);
 
         if ($validator->fails()) {

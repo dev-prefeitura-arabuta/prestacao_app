@@ -73,21 +73,25 @@ Route::middleware(['auth.session'])->group(function () {
         Route::post('users/{id}/delete', [UsersController::class, 'delete'])->whereNumber('id');
         Route::post('users/{id}/role', [UsersController::class, 'updateRole'])->whereNumber('id');
 
-        // Configurações
+        // Configurações do negócio (administrador)
         Route::get('settings', [SettingsController::class, 'index']);
-        Route::post('settings/smtp', [SettingsController::class, 'saveSmtp']);
-        Route::post('settings/smtp/toggle', [SettingsController::class, 'toggleSmtpStatus']);
-        Route::post('settings/whatsapp', [SettingsController::class, 'saveWhatsapp']);
-        Route::post('settings/whatsapp/toggle', [SettingsController::class, 'toggleWhatsappStatus']);
-        Route::post('settings/whatsapp/session/start', [SettingsController::class, 'startWhatsappSession']);
-        Route::get('settings/whatsapp/session/qr', [SettingsController::class, 'whatsappQr']);
-        Route::post('settings/whatsapp/test', [SettingsController::class, 'testWhatsapp']);
-        Route::post('settings/whatsapp/notify-overdue', [SettingsController::class, 'notifyOverdueWhatsapp']);
-        Route::post('settings/ollama', [SettingsController::class, 'saveOllama']);
         Route::post('settings/general', [SettingsController::class, 'saveGeneral']);
         Route::post('settings/general/remove-logo', [SettingsController::class, 'removeLogo']);
         Route::post('settings/pdf-cover', [SettingsController::class, 'savePdfCover']);
         Route::post('settings/pdf-cover/remove-art', [SettingsController::class, 'removePdfCoverArt']);
+
+        // Configurações técnicas (somente conta de desenvolvedor)
+        Route::middleware('developer')->group(function () {
+            Route::post('settings/smtp', [SettingsController::class, 'saveSmtp']);
+            Route::post('settings/smtp/toggle', [SettingsController::class, 'toggleSmtpStatus']);
+            Route::post('settings/whatsapp', [SettingsController::class, 'saveWhatsapp']);
+            Route::post('settings/whatsapp/toggle', [SettingsController::class, 'toggleWhatsappStatus']);
+            Route::post('settings/whatsapp/session/start', [SettingsController::class, 'startWhatsappSession']);
+            Route::get('settings/whatsapp/session/qr', [SettingsController::class, 'whatsappQr']);
+            Route::post('settings/whatsapp/test', [SettingsController::class, 'testWhatsapp']);
+            Route::post('settings/whatsapp/notify-overdue', [SettingsController::class, 'notifyOverdueWhatsapp']);
+            Route::post('settings/ollama', [SettingsController::class, 'saveOllama']);
+        });
     });
 
     // Perfil do Usuário

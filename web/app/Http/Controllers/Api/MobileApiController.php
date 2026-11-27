@@ -23,7 +23,10 @@ use App\Services\MobileTokenService;
 use App\Services\OpenWaService;
 use App\Services\PasswordResetService;
 use App\Services\ProfileService;
+use App\Rules\BrazilianPhone;
 use App\Support\Actor;
+use App\Support\DateInput;
+use App\Support\Phone;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
@@ -270,24 +273,17 @@ class MobileApiController extends Controller
             $status = 'aberta';
         }
 
-        // Aceita DD/MM/AAAA ou AAAA-MM-DD
-        $deadline = null;
-        if ($rawDeadline !== '') {
-            if (preg_match('/^(\d{2})\/(\d{2})\/(\d{4})$/', $rawDeadline, $m)) {
-                if (checkdate((int) $m[2], (int) $m[1], (int) $m[3])) {
-                    $deadline = "{$m[3]}-{$m[2]}-{$m[1]}";
-                } else {
-                    return response()->json(['success' => false, 'error' => 'Data limite inválida. Use o formato DD/MM/AAAA.'], 422);
-                }
-            } elseif (preg_match('/^\d{4}-\d{2}-\d{2}$/', $rawDeadline)) {
-                $deadline = $rawDeadline;
-            } else {
-                return response()->json(['success' => false, 'error' => 'Data limite inválida. Use o formato DD/MM/AAAA.'], 422);
-            }
+        // Aceita DD/MM/AAAA ou AAAA-MM-DD (data precisa existir: 31/02 é recusado)
+        $deadline = DateInput::parse($rawDeadline);
+        if ($deadline === false) {
+            return response()->json(['success' => false, 'error' => 'Data limite inválida. Use o formato DD/MM/AAAA.'], 422);
         }
 
         if (mb_strlen($title) < 3 || mb_strlen($title) > 100) {
             return response()->json(['success' => false, 'error' => 'O título deve ter entre 3 e 100 caracteres.'], 422);
+        }
+        if (mb_strlen($description) > 5000) {
+            return response()->json(['success' => false, 'error' => 'A descrição deve ter no máximo 5000 caracteres.'], 422);
         }
 
         $rawEnabledItems = $request->input('enabled_items');
@@ -438,9 +434,8 @@ class MobileApiController extends Controller
 
         $adminContacts = [];
         if (! $isAdmin) {
-            foreach (User::where('role', 'admin')->orderBy('id', 'asc')->get() as $adm) {
-                $admDigits = preg_replace('/\D/', '', (string) ($adm->whatsapp ?? '')) ?? '';
-                if (strlen($admDigits) >= 10) {
+            foreach (User::businessAdmins()->orderBy('id', 'asc')->get() as $adm) {
+                if (Phone::toInternational($adm->whatsapp) !== null) {
                     $adminContacts[] = [
                         'id'       => (int) $adm->id,
                         'name'     => (string) $adm->name,
@@ -505,13 +500,10 @@ class MobileApiController extends Controller
             }
             $waApiActive = $notifyAdmin && $waCfg && (int) ($waCfg->status ?? 0) === 1;
 
-            foreach (User::where('role', 'admin')->orderBy('id', 'asc')->get() as $adm) {
-                $digits = preg_replace('/\D/', '', (string) ($adm->whatsapp ?? '')) ?? '';
-                if (strlen($digits) < 10) {
+            foreach (User::businessAdmins()->orderBy('id', 'asc')->get() as $adm) {
+                $digits = Phone::toInternational($adm->whatsapp);
+                if ($digits === null) {
                     continue;
-                }
-                if (strlen($digits) <= 11 && ! str_starts_with($digits, '55')) {
-                    $digits = '55' . $digits;
                 }
 
                 $adminWaLinks[] = [
@@ -560,12 +552,9 @@ class MobileApiController extends Controller
             return response()->json(['success' => false, 'error' => 'Usuário não encontrado.'], 404);
         }
 
-        $digits = preg_replace('/\D/', '', (string) ($targetUser->whatsapp ?? '')) ?? '';
-        if (strlen($digits) < 10) {
+        $digits = Phone::toInternational($targetUser->whatsapp);
+        if ($digits === null) {
             return response()->json(['success' => false, 'error' => 'Este usuário não possui número de WhatsApp cadastrado.'], 422);
-        }
-        if (strlen($digits) <= 11 && ! str_starts_with($digits, '55')) {
-            $digits = '55' . $digits;
         }
 
         $itemNumber = (int) $request->input('item_number', 0);
@@ -807,7 +796,7 @@ class MobileApiController extends Controller
     {
         $user = $request->user();
 
-        $list = User::orderBy('id', 'asc')->get()->map(static fn ($u) => [
+        $list = User::visibleTo($user->isDeveloper())->orderBy('id', 'asc')->get()->map(static fn ($u) => [
             'id'       => (int) $u->id,
             'name'     => (string) $u->name,
             'email'    => (string) $u->email,
@@ -822,7 +811,8 @@ class MobileApiController extends Controller
     {
         $auth = $request->user();
 
-        $target = User::find($id);
+        // Contas de desenvolvedor só são visíveis/editáveis por outro desenvolvedor
+        $target = User::visibleTo($auth->isDeveloper())->find($id);
         if (! $target) {
             return response()->json(['success' => false, 'error' => 'Usuário não encontrado.'], 404);
         }
@@ -854,7 +844,8 @@ class MobileApiController extends Controller
     {
         $auth = $request->user();
 
-        $target = User::find($id);
+        // Contas de desenvolvedor só são visíveis/editáveis por outro desenvolvedor
+        $target = User::visibleTo($auth->isDeveloper())->find($id);
         if (! $target) {
             return response()->json(['success' => false, 'error' => 'Usuário não encontrado.'], 404);
         }
@@ -862,7 +853,7 @@ class MobileApiController extends Controller
         $validator = Validator::make($request->all(), [
             'name'     => 'required|min:3|max:100',
             'email'    => "required|email|max:100|unique:users,email,{$id}",
-            'whatsapp' => 'nullable|max:30',
+            'whatsapp' => ['nullable', 'max:30', new BrazilianPhone()],
             'role'     => 'required|in:admin,user',
             'password' => 'nullable|min:6',
         ], [
@@ -884,10 +875,14 @@ class MobileApiController extends Controller
             $whatsapp = trim((string) $request->input('whatsapp', ''));
             $data     = [
                 'name'     => trim((string) $request->input('name')),
-                'email'    => trim((string) $request->input('email')),
-                'whatsapp' => $whatsapp !== '' ? $whatsapp : null,
+                'email'    => strtolower(trim((string) $request->input('email'))),
+                'whatsapp' => Phone::format($whatsapp),
                 'role'     => (string) $request->input('role'),
             ];
+
+            if ($target->isDeveloper()) {
+                $data['role'] = 'admin';
+            }
 
             $newPassword = (string) $request->input('password', '');
             if ($newPassword !== '') {

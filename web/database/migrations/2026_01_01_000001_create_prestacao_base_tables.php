@@ -60,7 +60,8 @@ return new class extends Migration
                 $table->text('rejection_reason')->nullable();
                 $table->unsignedInteger('updated_by')->nullable();
                 $table->dateTime('updated_at')->nullable();
-                $table->index(['accountability_id', 'item_number'], 'accountability_id_item_number');
+                // Nome distinto do índice de anexos: no SQLite o nome do índice é único no banco inteiro
+                $table->index(['accountability_id', 'item_number'], 'item_statuses_accountability_id_item_number');
             });
         }
 

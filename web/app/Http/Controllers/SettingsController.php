@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\GeneralSettings;
 use App\Models\SmtpConfig;
 use App\Models\WhatsappConfig;
+use App\Rules\Cnpj;
+use App\Support\BrazilianDocument;
 use App\Services\OllamaService;
 use App\Services\OpenWaService;
 use App\Services\OverdueWhatsappNotifierService;
@@ -14,26 +16,43 @@ use Throwable;
 
 class SettingsController extends Controller
 {
+    /** Abas que exigem a conta de desenvolvedor. */
+    private const TECHNICAL_TABS = ['smtp', 'whatsapp', 'ollama'];
+
     public function index(Request $request)
     {
-        $role       = session('user_role') ?? session('role') ?? 'admin';
-        $activeTab  = (string) ($request->query('tab', 'smtp'));
-        $smtpConfig = null;
+        $role        = session('user_role') ?? session('role') ?? 'admin';
+        $isDeveloper = (bool) session('is_developer');
+        $activeTab   = (string) ($request->query('tab', $isDeveloper ? 'smtp' : 'general'));
 
-        try {
-            $row        = SmtpConfig::first();
-            $smtpConfig = $row ? $row->toArray() : null;
-        } catch (Throwable) {
-            $smtpConfig = null;
+        // Abas técnicas só existem para a conta de desenvolvedor
+        if (! $isDeveloper && in_array($activeTab, self::TECHNICAL_TABS, true)) {
+            $activeTab = 'general';
         }
 
-        $ollamaService  = new OllamaService();
-        $ollamaConfig   = $ollamaService->loadConfig();
-        $ollamaStatus   = ($activeTab === 'ollama') ? $ollamaService->getStatus() : ['online' => false, 'models' => []];
-        $generalConfig  = GeneralSettings::getSettings();
-        $openWaService  = new OpenWaService();
-        $whatsappConfig = $openWaService->loadConfig();
-        $whatsappStatus = ($activeTab === 'whatsapp') ? $openWaService->getStatus($whatsappConfig) : ['online' => false, 'message' => '', 'sessions' => []];
+        $smtpConfig     = null;
+        $ollamaConfig   = [];
+        $ollamaStatus   = ['online' => false, 'models' => []];
+        $whatsappConfig = [];
+        $whatsappStatus = ['online' => false, 'message' => '', 'sessions' => []];
+
+        if ($isDeveloper) {
+            try {
+                $row        = SmtpConfig::first();
+                $smtpConfig = $row ? $row->toArray() : null;
+            } catch (Throwable) {
+                $smtpConfig = null;
+            }
+
+            $ollamaService  = new OllamaService();
+            $ollamaConfig   = $ollamaService->loadConfig();
+            $ollamaStatus   = ($activeTab === 'ollama') ? $ollamaService->getStatus() : $ollamaStatus;
+            $openWaService  = new OpenWaService();
+            $whatsappConfig = $openWaService->loadConfig();
+            $whatsappStatus = ($activeTab === 'whatsapp') ? $openWaService->getStatus($whatsappConfig) : $whatsappStatus;
+        }
+
+        $generalConfig = GeneralSettings::getSettings();
 
         return view('settings.index', [
             'userName'       => session('user_name'),
@@ -41,6 +60,7 @@ class SettingsController extends Controller
             'userEmail'      => session('user_email'),
             'userRole'       => $role,
             'activeTab'      => $activeTab,
+            'isDeveloper'    => $isDeveloper,
             'smtpConfig'     => $smtpConfig,
             'ollamaConfig'   => $ollamaConfig,
             'ollamaStatus'   => $ollamaStatus,
@@ -55,7 +75,7 @@ class SettingsController extends Controller
         $validator = Validator::make($request->all(), [
             'app_name'     => 'required|min:2|max:150',
             'company_name' => 'required|min:2|max:200',
-            'cnpj'         => 'nullable|max:30',
+            'cnpj'         => ['nullable', 'max:30', new Cnpj()],
         ], [
             'app_name.required'     => 'O campo Nome do App é obrigatório.',
             'company_name.required' => 'O campo Empresa / Órgão é obrigatório.',
@@ -104,7 +124,7 @@ class SettingsController extends Controller
             $data = [
                 'app_name'     => trim((string) $request->input('app_name')),
                 'company_name' => trim((string) $request->input('company_name')),
-                'cnpj'         => trim((string) $request->input('cnpj')),
+                'cnpj'         => BrazilianDocument::format($request->input('cnpj')),
                 'app_logo'     => $logoPath,
             ];
 
@@ -291,7 +311,8 @@ class SettingsController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'smtp_host'       => 'required|max:255',
-            'smtp_port'       => 'required|max:10',
+            'smtp_port'       => 'required|integer|between:1,65535',
+            'smtp_timeout'    => 'nullable|integer|between:5,120',
             'smtp_encryption' => 'required|in:STARTTLS,SSL,TLS,NONE',
             'smtp_username'   => 'required|max:255',
             'email_address'   => 'required|email|max:255',
@@ -300,6 +321,9 @@ class SettingsController extends Controller
         ], [
             'smtp_host.required'       => 'O campo Servidor SMTP (Host) é obrigatório.',
             'smtp_port.required'       => 'O campo Porta SMTP é obrigatório.',
+            'smtp_port.integer'        => 'A Porta SMTP deve ser um número (ex: 587 ou 465).',
+            'smtp_port.between'        => 'A Porta SMTP deve estar entre 1 e 65535.',
+            'smtp_timeout.*'           => 'O tempo limite do SMTP deve ser entre 5 e 120 segundos.',
             'smtp_encryption.required' => 'Selecione o tipo de segurança/criptografia.',
             'smtp_username.required'   => 'O campo Usuário / E-mail de Login é obrigatório.',
             'email_address.required'   => 'O campo E-mail do Remetente é obrigatório.',
@@ -377,7 +401,7 @@ class SettingsController extends Controller
             'session_id'           => 'nullable|max:120',
             'session_name'         => 'required|max:120',
             'engine_type'          => 'required|in:whatsapp-web.js,baileys',
-            'default_country_code' => 'required|max:10',
+            'default_country_code' => ['required', 'regex:/^\+?\d{1,3}$/'],
             'timeout'              => 'nullable|integer|min:3|max:120',
             'webhook_url'          => 'nullable|url|max:255',
         ], [
@@ -385,6 +409,7 @@ class SettingsController extends Controller
             'api_url.url'                   => 'Informe uma URL válida para o Gateway OpenWA (ex: http://localhost:2785).',
             'session_name.required'         => 'O Nome da Sessão é obrigatório.',
             'default_country_code.required' => 'O DDI padrão é obrigatório (ex: 55).',
+            'default_country_code.regex'    => 'O DDI deve ter de 1 a 3 dígitos (ex: 55).',
             'webhook_url.url'               => 'A URL de Webhook informada é inválida.',
         ]);
 

@@ -56,6 +56,7 @@ class AuthController extends Controller
             'user_role'   => (string) ($user->role ?? 'user'),
             'role'        => (string) ($user->role ?? 'user'),
             'user_avatar' => $user->avatar ?? null,
+            'is_developer' => $user->isDeveloper(),
             'isLoggedIn'  => true,
         ]);
 
